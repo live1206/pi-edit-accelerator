@@ -13,7 +13,7 @@ The extension:
 - preserves built-in schema, argument preparation, prompt metadata, and renderers;
 - preserves BOM and LF/CRLF on its exact path.
 
-The exact path currently uses Pi's public full-file display and unified diff helpers. It establishes isolated extension wiring and compatibility but does not yet remove the measured diff hotspot. The next implementation step is sparse generation of both outputs from known edit ranges.
+The exact path currently uses Pi's public full-file display and unified diff helpers. This implementation is **baseline B**: it establishes isolated extension wiring, built-in fallback, and compatibility but does not yet remove the measured diff hotspot. Baseline A is Pi's unmodified built-in `edit` tool. The next implementation step is sparse generation of both outputs from known edit ranges.
 
 ## Development
 

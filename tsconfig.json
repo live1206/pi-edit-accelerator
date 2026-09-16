@@ -9,5 +9,5 @@
     "allowImportingTsExtensions": true,
     "verbatimModuleSyntax": true
   },
-  "include": ["extensions/**/*.ts", "src/**/*.ts", "test/**/*.ts"]
+  "include": ["benchmark/**/*.ts", "extensions/**/*.ts", "src/**/*.ts", "test/**/*.ts"]
 }

@@ -1,4 +1,5 @@
 node_modules/
+.artifacts/
 coverage/
 dist/
 *.log
