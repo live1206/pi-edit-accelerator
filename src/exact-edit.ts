@@ -2,13 +2,12 @@ import { constants } from "node:fs";
 import { access, readFile, writeFile } from "node:fs/promises";
 import { isAbsolute, resolve } from "node:path";
 import {
-  generateDiffString,
-  generateUnifiedPatch,
   type EditToolDetails,
   type EditToolInput,
   type ExtensionContext,
   withFileMutationQueue,
 } from "@earendil-works/pi-coding-agent";
+import { buildSparseLineDiffs, type LineReplacement } from "./sparse-diff.ts";
 
 export interface ExactEditResult {
   content: Array<{ type: "text"; text: string }>;
@@ -46,11 +45,16 @@ function resolveOrdinaryPath(path: string, cwd: string): string | undefined {
   return isAbsolute(path) ? resolve(path) : resolve(cwd, path);
 }
 
-export function tryApplyExactEdits(content: string, input: EditToolInput): string | undefined {
+interface ExactEditPlan {
+  newContent: string;
+  lineReplacements: LineReplacement[];
+}
+
+function tryPlanExactEdits(content: string, input: EditToolInput): ExactEditPlan | undefined {
   if (!Array.isArray(input.edits) || input.edits.length === 0) return undefined;
   if (normalizeForFuzzyMatch(content) !== content) return undefined;
 
-  const matches: Array<{ index: number; length: number; replacement: string }> = [];
+  const matches: Array<{ index: number; length: number; replacement: string; lineIndex: number }> = [];
   for (const edit of input.edits) {
     const oldText = normalizeToLf(edit.oldText);
     const newText = normalizeToLf(edit.newText);
@@ -58,7 +62,12 @@ export function tryApplyExactEdits(content: string, input: EditToolInput): strin
 
     const index = content.indexOf(oldText);
     if (index === -1 || content.indexOf(oldText, index + 1) !== -1) return undefined;
-    matches.push({ index, length: oldText.length, replacement: newText });
+    const lineStart = content.lastIndexOf("\n", index - 1) + 1;
+    const nextNewline = content.indexOf("\n", index);
+    const lineEnd = nextNewline === -1 ? content.length : nextNewline;
+    if (index !== lineStart || index + oldText.length !== lineEnd || newText.includes("\n")) return undefined;
+    const lineIndex = content.slice(0, lineStart).split("\n").length - 1;
+    matches.push({ index, length: oldText.length, replacement: newText, lineIndex });
   }
 
   matches.sort((left, right) => left.index - right.index);
@@ -72,7 +81,19 @@ export function tryApplyExactEdits(content: string, input: EditToolInput): strin
     const match = matches[index]!;
     result = result.slice(0, match.index) + match.replacement + result.slice(match.index + match.length);
   }
-  return result === content ? undefined : result;
+  if (result === content) return undefined;
+  return {
+    newContent: result,
+    lineReplacements: matches.map((match) => ({
+      lineIndex: match.lineIndex,
+      oldText: content.slice(match.index, match.index + match.length),
+      newText: match.replacement,
+    })),
+  };
+}
+
+export function tryApplyExactEdits(content: string, input: EditToolInput): string | undefined {
+  return tryPlanExactEdits(content, input)?.newContent;
 }
 
 export async function tryExecuteExactEdit(
@@ -97,18 +118,22 @@ export async function tryExecuteExactEdit(
     const content = bom ? rawContent.slice(1) : rawContent;
     const lineEnding = detectLineEnding(content);
     const normalizedContent = normalizeToLf(content);
-    const newContent = tryApplyExactEdits(normalizedContent, input);
-    if (newContent === undefined) return undefined;
+    const plan = tryPlanExactEdits(normalizedContent, input);
+    if (plan === undefined) return undefined;
 
-    const diff = generateDiffString(normalizedContent, newContent);
-    const patch = generateUnifiedPatch(input.path, normalizedContent, newContent);
+    const sparseDiffs = buildSparseLineDiffs(
+      input.path,
+      normalizedContent,
+      plan.newContent,
+      plan.lineReplacements,
+    );
     if (signal?.aborted) throw new Error("Operation aborted");
-    await writeFile(absolutePath, bom + restoreLineEndings(newContent, lineEnding), "utf8");
+    await writeFile(absolutePath, bom + restoreLineEndings(plan.newContent, lineEnding), "utf8");
     if (signal?.aborted) throw new Error("Operation aborted");
 
     return {
       content: [{ type: "text", text: `Successfully replaced ${input.edits.length} block(s) in ${input.path}.` }],
-      details: { diff: diff.diff, patch, firstChangedLine: diff.firstChangedLine },
+      details: sparseDiffs,
     };
   });
 }

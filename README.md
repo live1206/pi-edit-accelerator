@@ -13,7 +13,9 @@ The extension:
 - preserves built-in schema, argument preparation, prompt metadata, and renderers;
 - preserves BOM and LF/CRLF on its exact path.
 
-The exact path currently uses Pi's public full-file display and unified diff helpers. This implementation is **baseline B**: it establishes isolated extension wiring, built-in fallback, and compatibility but does not yet remove the measured diff hotspot. Baseline A is Pi's unmodified built-in `edit` tool. The next implementation step is sparse generation of both outputs from known edit ranges.
+Commit `44fae2d` is **baseline B**: isolated extension wiring with built-in fallback and Pi's full-file diff helpers. Baseline A is Pi's unmodified built-in `edit` tool.
+
+The current development tree is **candidate C**. It sparsely generates display and unified diffs for globally unique, normalization-neutral, whole-line exact replacements. All other inputs delegate to the captured built-in tool. The initial narrow scope establishes compatibility and speed before expanding to multiline exact edits.
 
 ## Development
 
