@@ -1,0 +1,28 @@
+{
+  "name": "@live1206/pi-edit-accelerator",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "keywords": ["pi-package"],
+  "pi": {
+    "extensions": ["./extensions/edit-accelerator.ts"]
+  },
+  "scripts": {
+    "check": "tsc --noEmit",
+    "test": "vitest --run"
+  },
+  "peerDependencies": {
+    "@earendil-works/pi-coding-agent": "*",
+    "typebox": "*"
+  },
+  "devDependencies": {
+    "@earendil-works/pi-coding-agent": "0.85.1",
+    "@types/node": "22.19.19",
+    "typescript": "5.9.3",
+    "typebox": "1.3.27",
+    "vitest": "4.1.9"
+  },
+  "engines": {
+    "node": ">=22.19.0"
+  }
+}
