@@ -1,6 +1,6 @@
 {
   "name": "@live1206/pi-edit-accelerator",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "A sparse exact-edit and diff accelerator extension for Pi",
   "type": "module",
   "license": "MIT",
@@ -13,6 +13,7 @@
     "docs",
     "extensions",
     "src",
+    "CHANGELOG.md",
     "README.md",
     "LICENSE"
   ],
