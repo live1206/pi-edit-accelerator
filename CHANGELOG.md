@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.1.3 - 2026-09-17
 
 - Defer complete output construction until execution needs it.
 - Write eligible equal-byte-length edits directly at their verified byte positions.

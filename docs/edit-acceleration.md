@@ -130,10 +130,10 @@ Twenty alternating measured runs after three warmups from commit `b8fe59b`:
 
 | Implementation | Median | p95 | Mean |
 |---|---:|---:|---:|
-| Built-in A | 423.37 ms | 502.22 ms | 432.14 ms |
-| Sparse extension C | 37.86 ms | 50.62 ms | 41.17 ms |
+| Built-in A | 401.93 ms | 506.17 ms | 414.26 ms |
+| Sparse extension C | 40.87 ms | 47.01 ms | 43.28 ms |
 
-Version 0.1.2 reduced median execution latency by approximately 91% on this stress fixture.
+Version 0.1.3 reduced median execution latency by approximately 90% on this stress fixture.
 
 ### Interactive preview benchmark
 
@@ -141,8 +141,8 @@ Ten alternating runs:
 
 | Preview | Median |
 |---|---:|
-| Built-in | 287.98 ms |
-| Sparse extension | 22.35 ms |
+| Built-in | 277.91 ms |
+| Sparse extension | 23.14 ms |
 
 The preview result is exploratory but confirms that sparse preview removes most of the separate interactive diff cost.
 
@@ -163,10 +163,10 @@ Twenty alternating executions compared the same prepared 5 MB edit with position
 
 | Write strategy | Median execution |
 |---|---:|
-| Full-file materialization and write | 26.67 ms |
-| Verified positional writes | 4.64 ms |
+| Full-file materialization and write | 25.16 ms |
+| Verified positional writes | 4.50 ms |
 
-The positional write stage was approximately 83% faster. For the complete interactive lifecycle, an equal-byte-length edit measured 47.05 ms on `v0.1.2` and 23.52 ms with positional writes, a 50% reduction. The positional path is deliberately unavailable when replacement byte lengths differ or line-ending normalization changes offsets.
+The positional write stage was approximately 82% faster. For the complete interactive lifecycle, an equal-byte-length edit measured 47.05 ms on `v0.1.2` and 26.24 ms on `v0.1.3`, a 44% reduction. Normalizing each extension result against its same-run built-in measurement gives an approximately 46% relative improvement. The positional path is deliberately unavailable when replacement byte lengths differ or line-ending normalization changes offsets.
 
 These stress results demonstrate scaling potential. They do not establish normal-session impact; that depends on real file sizes and fast-path frequency.
 
