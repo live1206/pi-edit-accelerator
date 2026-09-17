@@ -13,6 +13,7 @@
   },
   "scripts": {
     "bench:a-vs-b": "tsx benchmark/a-vs-b.ts",
+    "bench:preview": "tsx benchmark/preview.ts",
     "check": "tsc --noEmit",
     "test": "vitest --run"
   },

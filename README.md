@@ -15,7 +15,11 @@ The extension:
 
 Commit `44fae2d` is **baseline B**: isolated extension wiring with built-in fallback and Pi's full-file diff helpers. Baseline A is Pi's unmodified built-in `edit` tool.
 
-The current development tree is **candidate C**. It sparsely generates display and unified diffs for globally unique, normalization-neutral, whole-line exact replacements. All other inputs delegate to the captured built-in tool. The initial narrow scope establishes compatibility and speed before expanding to multiline exact edits.
+The current development tree is **candidate C**. It sparsely generates display and unified diffs for globally unique, normalization-neutral exact replacements, including partial-line and multiline edits with line insertion or deletion. Fuzzy, ambiguous, special-path, and other unsupported inputs delegate to the captured built-in tool.
+
+Use `/edit-accelerator-stats` to view aggregate accelerated and fallback counts, and `/edit-accelerator-reset-stats` to reset them. Statistics are process-local and never retain paths, arguments, or file contents.
+
+Candidate C also builds sparse interactive previews for eligible edits while preserving Pi's built-in renderer presentation. Unsupported preview inputs delegate to the captured built-in renderer. On a 5 MB, two-edit exploratory benchmark, preview median fell from 303 ms to 91 ms.
 
 ## Development
 
@@ -23,6 +27,7 @@ The current development tree is **candidate C**. It sparsely generates display a
 npm install --ignore-scripts
 npm run check
 npm test
+npm run bench:preview
 ```
 
 Try without installing:

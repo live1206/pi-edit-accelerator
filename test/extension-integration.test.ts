@@ -3,6 +3,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
   createEditToolDefinition,
+  initTheme,
   type EditToolInput,
   type ExtensionAPI,
   type ExtensionContext,
@@ -25,10 +26,11 @@ async function createDirectory(): Promise<string> {
 function loadExtensionTool(): ReturnType<typeof createEditToolDefinition> {
   let registered: ReturnType<typeof createEditToolDefinition> | undefined;
   editAccelerator({
-    registerTool(tool) {
+    registerTool(tool: unknown) {
       registered = tool as unknown as ReturnType<typeof createEditToolDefinition>;
     },
-  } as ExtensionAPI);
+    registerCommand() {},
+  } as unknown as ExtensionAPI);
   if (!registered) throw new Error("Extension did not register its edit tool");
   return registered;
 }
@@ -42,6 +44,43 @@ async function execute(
 }
 
 describe("edit accelerator extension", () => {
+  it("builds an accelerated interactive preview", async () => {
+    initTheme("dark");
+    const directory = await createDirectory();
+    await writeFile(join(directory, "fixture.txt"), "before\nmiddle\n", "utf8");
+    const tool = loadExtensionTool();
+    if (!tool.renderCall) throw new Error("Extension did not register a call renderer");
+    type RenderCall = NonNullable<typeof tool.renderCall>;
+    const identity = (text: string): string => text;
+    const theme = new Proxy(
+      { fg: (_name: string, text: string) => text, bg: (_name: string, text: string) => text, bold: identity },
+      { get: (target, property) => Reflect.get(target, property) ?? identity },
+    ) as unknown as Parameters<RenderCall>[1];
+    const state = {};
+    let component: ReturnType<RenderCall>;
+    await new Promise<void>((resolvePreview, rejectPreview) => {
+      const timeout = setTimeout(() => rejectPreview(new Error("Preview timed out")), 2_000);
+      const context = {
+        state,
+        lastComponent: undefined,
+        argsComplete: true,
+        cwd: directory,
+        invalidate() {
+          clearTimeout(timeout);
+          resolvePreview();
+        },
+      } as unknown as Parameters<RenderCall>[2];
+      component = tool.renderCall!(
+        { path: "fixture.txt", edits: [{ oldText: "before", newText: "after" }] },
+        theme,
+        context,
+      );
+    });
+
+    expect(component!.render(80).join("\n")).toContain("after");
+  });
+
+
   it("registers one edit override with the built-in contract", () => {
     const tool = loadExtensionTool();
     expect(tool.name).toBe("edit");
@@ -58,6 +97,29 @@ describe("edit accelerator extension", () => {
     const input: EditToolInput = {
       path: "fixture.txt",
       edits: [{ oldText: "before", newText: "after" }],
+    };
+
+    const extensionResult = await execute(loadExtensionTool(), extensionDirectory, input);
+    const builtInResult = await execute(createEditToolDefinition(builtInDirectory), builtInDirectory, input);
+
+    expect(extensionResult).toEqual(builtInResult);
+    expect(await readFile(join(extensionDirectory, "fixture.txt"), "utf8")).toBe(
+      await readFile(join(builtInDirectory, "fixture.txt"), "utf8"),
+    );
+  });
+
+  it("matches the built-in result for partial and multiline edits", async () => {
+    const extensionDirectory = await createDirectory();
+    const builtInDirectory = await createDirectory();
+    const content = "const before = 1;\nold one\nold two\nlast\n";
+    await writeFile(join(extensionDirectory, "fixture.txt"), content, "utf8");
+    await writeFile(join(builtInDirectory, "fixture.txt"), content, "utf8");
+    const input: EditToolInput = {
+      path: "fixture.txt",
+      edits: [
+        { oldText: "before", newText: "after" },
+        { oldText: "old one\nold two", newText: "new one\nnew two\nnew three" },
+      ],
     };
 
     const extensionResult = await execute(loadExtensionTool(), extensionDirectory, input);

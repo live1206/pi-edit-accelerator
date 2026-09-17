@@ -70,10 +70,11 @@ function summarize(values: readonly number[]): Statistics {
 function loadExtensionTool(): EditDefinition {
   let registered: EditDefinition | undefined;
   editAccelerator({
-    registerTool(tool) {
-      registered = tool as unknown as EditDefinition;
+    registerTool(tool: unknown) {
+      registered = tool as EditDefinition;
     },
-  } as ExtensionAPI);
+    registerCommand() {},
+  } as unknown as ExtensionAPI);
   if (!registered) throw new Error("Extension did not register its edit tool");
   return registered;
 }
