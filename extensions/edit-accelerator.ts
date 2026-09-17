@@ -4,13 +4,29 @@ import {
   type ExtensionAPI,
   type ExtensionContext,
 } from "@earendil-works/pi-coding-agent";
-import { tryBuildExactPreview, tryExecuteExactEdit } from "../src/exact-edit.ts";
+import {
+  getExactEditInputKey,
+  type PreparedExactEdit,
+  tryExecuteExactEdit,
+  tryPrepareExactEdit,
+} from "../src/exact-edit.ts";
 import { createEditAcceleratorStats, formatEditAcceleratorStats } from "../src/stats.ts";
 
 export default function editAccelerator(pi: ExtensionAPI): void {
   const builtInEdit = createEditToolDefinition(process.cwd());
   const stats = createEditAcceleratorStats();
   const previewStates = new WeakMap<object, { argsKey: string; pending: boolean; fallback: boolean }>();
+  let preparedPreview:
+    | {
+        inputKey: string;
+        promise: Promise<PreparedExactEdit | undefined>;
+        expiration?: ReturnType<typeof setTimeout>;
+      }
+    | undefined;
+  const clearPreparedPreview = (): void => {
+    if (preparedPreview?.expiration) clearTimeout(preparedPreview.expiration);
+    preparedPreview = undefined;
+  };
 
   pi.registerTool({
     ...builtInEdit,
@@ -29,16 +45,28 @@ export default function editAccelerator(pi: ExtensionAPI): void {
       if (context.argsComplete && !previewState.pending) {
         previewState.pending = true;
         const currentState = previewState;
-        void tryBuildExactPreview(args as EditToolInput, context.cwd).then((preview) => {
+        const input = args as EditToolInput;
+        const inputKey = getExactEditInputKey(input, context.cwd);
+        const preparation = tryPrepareExactEdit(input, context.cwd);
+        clearPreparedPreview();
+        if (inputKey) {
+          const candidate: NonNullable<typeof preparedPreview> = { inputKey, promise: preparation };
+          preparedPreview = candidate;
+          candidate.expiration = setTimeout(() => {
+            if (preparedPreview === candidate) preparedPreview = undefined;
+          }, 60_000);
+          candidate.expiration.unref();
+        }
+        void preparation.then((prepared) => {
           if (previewStates.get(context.state) !== currentState) return;
-          if (!preview) {
+          if (!prepared) {
             currentState.fallback = true;
             builtInEdit.renderCall!(args, theme, context);
             context.invalidate();
             return;
           }
           builtInEdit.renderResult!(
-            { content: [], details: preview },
+            { content: [], details: prepared.result.details },
             { expanded: false, isPartial: false },
             theme,
             {
@@ -54,8 +82,15 @@ export default function editAccelerator(pi: ExtensionAPI): void {
       return component;
     },
     async execute(toolCallId, input: EditToolInput, signal, onUpdate, ctx: ExtensionContext) {
-      const accelerated = await tryExecuteExactEdit(input, signal, ctx);
-      if (accelerated !== undefined) {
+      const inputKey = getExactEditInputKey(input, ctx.cwd);
+      const matchingPreview = inputKey && preparedPreview?.inputKey === inputKey ? preparedPreview : undefined;
+      if (matchingPreview) clearPreparedPreview();
+      const prepared = await matchingPreview?.promise;
+      const accelerated = matchingPreview
+        ? prepared && (await tryExecuteExactEdit(input, signal, ctx, prepared))
+        : await tryExecuteExactEdit(input, signal, ctx);
+      if (accelerated) {
+        if (prepared && accelerated.details === prepared.result.details) stats.recordPreviewPlanReuse();
         stats.recordAccelerated();
         return accelerated;
       }

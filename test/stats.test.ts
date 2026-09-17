@@ -7,14 +7,17 @@ describe("edit accelerator statistics", () => {
     stats.recordAccelerated();
     stats.recordAccelerated();
     stats.recordFallback();
+    stats.recordPreviewPlanReuse();
 
     const snapshot = stats.snapshot();
     expect(snapshot).toMatchObject({
       totalCalls: 3,
       acceleratedCalls: 2,
       fallbackCalls: 1,
+      previewPlanReuses: 1,
     });
     expect(snapshot.acceleratedPercent).toBeCloseTo(200 / 3);
+    expect(formatEditAcceleratorStats(snapshot)).toContain("Preview plans reused: 1");
     expect(formatEditAcceleratorStats(snapshot)).toContain("Fast-path rate: 66.7%");
   });
 
@@ -26,6 +29,7 @@ describe("edit accelerator statistics", () => {
       totalCalls: 0,
       acceleratedCalls: 0,
       fallbackCalls: 0,
+      previewPlanReuses: 0,
       acceleratedPercent: 0,
     });
   });

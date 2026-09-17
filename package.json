@@ -31,6 +31,7 @@
   "scripts": {
     "bench:a-vs-b": "tsx benchmark/a-vs-b.ts",
     "bench:preview": "tsx benchmark/preview.ts",
+    "bench:interactive": "tsx benchmark/interactive.ts",
     "profile": "tsx benchmark/profile-candidate.ts",
     "profile:analyze": "tsx benchmark/analyze-profile.ts",
     "check": "tsc --noEmit",

@@ -51,6 +51,27 @@ interface ExactEditPlan {
   oldLineCount: number;
 }
 
+export interface PreparedExactEdit {
+  absolutePath: string;
+  inputKey: string;
+  rawBytes: Buffer;
+  bom: string;
+  lineEnding: "\r\n" | "\n";
+  newContent: string;
+  result: ExactEditResult;
+}
+
+export function getExactEditInputKey(input: EditToolInput, cwd: string): string | undefined {
+  if (typeof input?.path !== "string" || !Array.isArray(input.edits)) return undefined;
+  const absolutePath = resolveOrdinaryPath(input.path, cwd);
+  if (!absolutePath) return undefined;
+  try {
+    return `${absolutePath}\0${JSON.stringify({ path: input.path, edits: input.edits })}`;
+  } catch {
+    return undefined;
+  }
+}
+
 function tryPlanExactEdits(content: string, input: EditToolInput): ExactEditPlan | undefined {
   if (!Array.isArray(input.edits) || input.edits.length === 0) return undefined;
   if (!isFuzzyNormalizationNeutral(content)) return undefined;
@@ -128,36 +149,61 @@ export function tryApplyExactEdits(content: string, input: EditToolInput): strin
   return tryPlanExactEdits(content, input)?.newContent;
 }
 
-export async function tryBuildExactPreview(
+export async function tryPrepareExactEdit(
   input: EditToolInput,
   cwd: string,
-): Promise<EditToolDetails | undefined> {
-  if (typeof input?.path !== "string" || !Array.isArray(input.edits)) return undefined;
-  const absolutePath = resolveOrdinaryPath(input.path, cwd);
-  if (!absolutePath) return undefined;
+): Promise<PreparedExactEdit | undefined> {
+  const inputKey = getExactEditInputKey(input, cwd);
+  if (!inputKey) return undefined;
+  const absolutePath = resolveOrdinaryPath(input.path, cwd)!;
   try {
     await access(absolutePath, constants.R_OK);
-    const rawContent = await readFile(absolutePath, "utf8");
-    const content = rawContent.startsWith("\uFEFF") ? rawContent.slice(1) : rawContent;
+    const rawBytes = await readFile(absolutePath);
+    const rawContent = rawBytes.toString("utf8");
+    const bom = rawContent.startsWith("\uFEFF") ? "\uFEFF" : "";
+    const content = bom ? rawContent.slice(1) : rawContent;
+    const lineEnding = detectLineEnding(content);
     const normalizedContent = normalizeToLf(content);
     const plan = tryPlanExactEdits(normalizedContent, input);
     if (!plan) return undefined;
-    return buildSparseDiffs(
+    const details = buildSparseDiffs(
       input.path,
       normalizedContent,
       plan.newContent,
       plan.replacements,
       plan.oldLineCount,
     );
+    return {
+      absolutePath,
+      inputKey,
+      rawBytes,
+      bom,
+      lineEnding,
+      newContent: plan.newContent,
+      result: {
+        content: [
+          { type: "text", text: `Successfully replaced ${input.edits.length} block(s) in ${input.path}.` },
+        ],
+        details,
+      },
+    };
   } catch {
     return undefined;
   }
+}
+
+export async function tryBuildExactPreview(
+  input: EditToolInput,
+  cwd: string,
+): Promise<EditToolDetails | undefined> {
+  return (await tryPrepareExactEdit(input, cwd))?.result.details;
 }
 
 export async function tryExecuteExactEdit(
   input: EditToolInput,
   signal: AbortSignal | undefined,
   ctx: ExtensionContext,
+  prepared?: PreparedExactEdit,
 ): Promise<ExactEditResult | undefined> {
   if (typeof input?.path !== "string" || !Array.isArray(input.edits)) return undefined;
   const absolutePath = resolveOrdinaryPath(input.path, ctx.cwd);
@@ -172,7 +218,23 @@ export async function tryExecuteExactEdit(
     }
     if (signal?.aborted) throw new Error("Operation aborted");
 
-    const rawContent = await readFile(absolutePath, "utf8");
+    const rawBytes = await readFile(absolutePath);
+    if (
+      prepared?.absolutePath === absolutePath &&
+      prepared.inputKey === getExactEditInputKey(input, ctx.cwd) &&
+      prepared.rawBytes.equals(rawBytes)
+    ) {
+      if (signal?.aborted) throw new Error("Operation aborted");
+      await writeFile(
+        absolutePath,
+        prepared.bom + restoreLineEndings(prepared.newContent, prepared.lineEnding),
+        "utf8",
+      );
+      if (signal?.aborted) throw new Error("Operation aborted");
+      return prepared.result;
+    }
+
+    const rawContent = rawBytes.toString("utf8");
     const bom = rawContent.startsWith("\uFEFF") ? "\uFEFF" : "";
     const content = bom ? rawContent.slice(1) : rawContent;
     const lineEnding = detectLineEnding(content);

@@ -46,7 +46,7 @@ The TypeScript sparse backend currently supports normalization-neutral, globally
 - files with or without a trailing newline
 - multibyte UTF-8 text
 
-It matches all edits against the original content, validates uniqueness and overlap, applies replacements in reverse offset order, and generates only the affected diff regions plus context.
+It matches all edits against the original content, validates uniqueness and overlap, assembles the replacement result in one forward pass, and generates only the affected diff regions plus context.
 
 ## Built-in fallback
 
@@ -80,6 +80,8 @@ Compatibility tests compare all three outputs against Pi's public built-in helpe
 
 The built-in edit renderer normally rereads and diffs the complete file before execution. Candidate C computes the same sparse result asynchronously and feeds it into Pi's built-in renderer, retaining the normal presentation.
 
+Execution shares an in-flight exact-preview plan when the resolved path and complete edit input match. It still rereads the file under Pi's mutation queue and reuses the plan only when the file bytes exactly match the preview input. A changed file is replanned from its current content. Prepared plans expire after 60 seconds and only one plan is retained, bounding memory use.
+
 Unsupported preview inputs are delegated to the captured built-in preview implementation.
 
 ## Observability
@@ -96,6 +98,7 @@ They report only:
 - total edit calls
 - accelerated calls
 - built-in fallback calls
+- preview plans reused
 - fast-path percentage
 
 No paths, arguments, old text, replacement text, or file contents are retained.
@@ -140,6 +143,17 @@ Ten alternating runs:
 
 The preview result is exploratory but confirms that sparse preview removes most of the separate interactive diff cost.
 
+### Combined interactive preview and execution
+
+Ten alternating 5 MB runs start preview and execution in the same order as Pi's interactive lifecycle. The released `v0.1.1` implementation independently planned both operations; the preview-reuse candidate shares the in-flight plan.
+
+| Extension version | Median preview-to-write latency |
+|---|---:|
+| `v0.1.1` | 77.40 ms |
+| Preview-plan reuse candidate | 48.79 ms |
+
+The candidate reduced median interactive latency by approximately 37%. Normalizing each extension result against the built-in measurement from the same run gives an approximately 35% relative improvement, reducing the effect of machine-load variation between benchmark runs.
+
 These stress results demonstrate scaling potential. They do not establish normal-session impact; that depends on real file sizes and fast-path frequency.
 
 ## Edit override compatibility
@@ -158,6 +172,8 @@ Current tests cover:
 - exact execution equivalence
 - fuzzy fallback equivalence
 - sparse preview rendering
+- in-flight preview-plan reuse
+- exact file-content invalidation before reuse
 - partial-line and multiline edits
 - insertion and deletion
 - nearby and distant hunks
@@ -196,7 +212,7 @@ The latest execution profile retained 505 samples over approximately 67 ms. Its 
 
 The latest preview profile retained 321 samples over approximately 43 ms. Exact planning used 11.0 ms, normalization eligibility 7.3 ms, UTF-8 decode 5.5 ms, and sparse diff construction only 0.4 ms.
 
-Sparse hunk generation is no longer a meaningful hotspot. Remaining CPU is split across matching, safety checks, decoding, and result assembly. A likely next TypeScript experiment is caching a verified sparse preview plan for execution, with an exact file-content check to prevent reuse after concurrent changes.
+Sparse hunk generation is no longer a meaningful hotspot. Remaining CPU is split across matching, safety checks, decoding, and result assembly. Preview-plan reuse removes duplicate planning from interactive exact edits while retaining an exact file-content check before writes.
 
 ## Rust decision gate
 
@@ -217,8 +233,8 @@ If no single stage dominates, keep the TypeScript implementation and optimize it
 
 1. Resolve or temporarily disable the competing SoL-Pi Action Fusion edit override.
 2. Run a controlled local pilot and collect aggregate hit/fallback counts.
-3. Combine remaining full-file TypeScript scans where practical.
-4. Rerun scoped execution and preview profiles.
-5. Rerun clean A/C benchmarks.
+3. Collect preview-plan reuse rates and watch fallback latency during the pilot.
+4. Combine remaining full-file TypeScript scans where practical.
+5. Rerun scoped execution, preview, and combined interactive profiles.
 6. Prototype Rust only if a coarse stage still offers meaningful savings after JS/native conversion.
 7. Validate Node, Bun, Linux, macOS, and Windows before broad installation.

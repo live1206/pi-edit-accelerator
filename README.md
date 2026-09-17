@@ -90,7 +90,7 @@ Use these process-local commands during a session:
 /edit-accelerator-reset-stats
 ```
 
-They report only total, accelerated, and fallback counts plus the fast-path percentage. No paths, arguments, replacement text, or file contents are retained.
+They report only total, accelerated, fallback, and preview-plan reuse counts plus the fast-path percentage. No paths, arguments, replacement text, or file contents are retained.
 
 ## Other edit overrides
 
@@ -121,6 +121,7 @@ Benchmarks:
 ```sh
 npm run bench:a-vs-b -- --runs 20 --warmup 3
 npm run bench:preview
+npm run bench:interactive
 npm run profile -- --mode execution --output .artifacts/execution.cpuprofile --report .artifacts/execution-profile.json
 npm run profile:analyze -- .artifacts/execution.cpuprofile --output .artifacts/execution-analysis.json
 ```
@@ -142,8 +143,8 @@ See [docs/edit-acceleration.md](docs/edit-acceleration.md) for:
 
 1. Collect real-session accelerated/fallback rates.
 2. Add permission, symlink, abort, concurrency, malformed-preview, and cross-platform tests.
-3. Combine the remaining normalization, matching, and line-index scans where practical.
-4. Rerun candidate-C execution and preview profiles and clean benchmarks.
+3. Collect preview-plan reuse rates and watch fallback latency during the pilot.
+4. Combine the remaining normalization and matching scans where practical.
 5. Validate Linux, macOS, Windows, Node, and Bun.
 6. Prototype Rust only if a coarse CPU-bound stage still offers meaningful savings after JS/native conversion.
 

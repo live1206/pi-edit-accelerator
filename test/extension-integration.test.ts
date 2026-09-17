@@ -43,43 +43,71 @@ async function execute(
   return tool.execute("tool-call", input, undefined, undefined, { cwd: directory } as ExtensionContext);
 }
 
+function renderPreview(
+  tool: ReturnType<typeof createEditToolDefinition>,
+  directory: string,
+  input: EditToolInput,
+) {
+  if (!tool.renderCall) throw new Error("Extension did not register a call renderer");
+  type RenderCall = NonNullable<typeof tool.renderCall>;
+  const identity = (text: string): string => text;
+  const theme = new Proxy(
+    { fg: (_name: string, text: string) => text, bg: (_name: string, text: string) => text, bold: identity },
+    { get: (target, property) => Reflect.get(target, property) ?? identity },
+  ) as unknown as Parameters<RenderCall>[1];
+  const state = {};
+  let resolvePreview!: () => void;
+  let rejectPreview!: (error: Error) => void;
+  const done = new Promise<void>((resolve, reject) => {
+    resolvePreview = resolve;
+    rejectPreview = reject;
+  });
+  const timeout = setTimeout(() => rejectPreview(new Error("Preview timed out")), 2_000);
+  const context = {
+    state,
+    lastComponent: undefined,
+    argsComplete: true,
+    cwd: directory,
+    invalidate() {
+      clearTimeout(timeout);
+      resolvePreview();
+    },
+  } as unknown as Parameters<RenderCall>[2];
+  const component = tool.renderCall(input, theme, context);
+  return { component, done };
+}
+
 describe("edit accelerator extension", () => {
   it("builds an accelerated interactive preview", async () => {
     initTheme("dark");
     const directory = await createDirectory();
     await writeFile(join(directory, "fixture.txt"), "before\nmiddle\n", "utf8");
     const tool = loadExtensionTool();
-    if (!tool.renderCall) throw new Error("Extension did not register a call renderer");
-    type RenderCall = NonNullable<typeof tool.renderCall>;
-    const identity = (text: string): string => text;
-    const theme = new Proxy(
-      { fg: (_name: string, text: string) => text, bg: (_name: string, text: string) => text, bold: identity },
-      { get: (target, property) => Reflect.get(target, property) ?? identity },
-    ) as unknown as Parameters<RenderCall>[1];
-    const state = {};
-    let component: ReturnType<RenderCall>;
-    await new Promise<void>((resolvePreview, rejectPreview) => {
-      const timeout = setTimeout(() => rejectPreview(new Error("Preview timed out")), 2_000);
-      const context = {
-        state,
-        lastComponent: undefined,
-        argsComplete: true,
-        cwd: directory,
-        invalidate() {
-          clearTimeout(timeout);
-          resolvePreview();
-        },
-      } as unknown as Parameters<RenderCall>[2];
-      component = tool.renderCall!(
-        { path: "fixture.txt", edits: [{ oldText: "before", newText: "after" }] },
-        theme,
-        context,
-      );
+    const preview = renderPreview(tool, directory, {
+      path: "fixture.txt",
+      edits: [{ oldText: "before", newText: "after" }],
     });
+    await preview.done;
 
-    expect(component!.render(80).join("\n")).toContain("after");
+    expect(preview.component.render(80).join("\n")).toContain("after");
   });
 
+  it("shares an in-flight preview with execution", async () => {
+    initTheme("dark");
+    const directory = await createDirectory();
+    await writeFile(join(directory, "fixture.txt"), "before\nmiddle\n", "utf8");
+    const input: EditToolInput = {
+      path: "fixture.txt",
+      edits: [{ oldText: "before", newText: "after" }],
+    };
+    const tool = loadExtensionTool();
+
+    const preview = renderPreview(tool, directory, input);
+    const [result] = await Promise.all([execute(tool, directory, input), preview.done]);
+
+    expect(result.details?.diff).toContain("+1 after");
+    expect(await readFile(join(directory, "fixture.txt"), "utf8")).toBe("after\nmiddle\n");
+  });
 
   it("registers one edit override with the built-in contract", () => {
     const tool = loadExtensionTool();
@@ -141,7 +169,12 @@ describe("edit accelerator extension", () => {
       edits: [{ oldText: "const value = 'before';", newText: "const value = 'after';" }],
     };
 
-    const extensionResult = await execute(loadExtensionTool(), extensionDirectory, input);
+    const extensionTool = loadExtensionTool();
+    const preview = renderPreview(extensionTool, extensionDirectory, input);
+    const [extensionResult] = await Promise.all([
+      execute(extensionTool, extensionDirectory, input),
+      preview.done,
+    ]);
     const builtInResult = await execute(createEditToolDefinition(builtInDirectory), builtInDirectory, input);
 
     expect(extensionResult).toEqual(builtInResult);

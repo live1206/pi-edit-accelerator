@@ -3,7 +3,11 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { EditToolInput, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { afterEach, describe, expect, it } from "vitest";
-import { tryApplyExactEdits, tryExecuteExactEdit } from "../src/exact-edit.ts";
+import {
+  tryApplyExactEdits,
+  tryExecuteExactEdit,
+  tryPrepareExactEdit,
+} from "../src/exact-edit.ts";
 
 const tempDirectories: string[] = [];
 
@@ -37,6 +41,75 @@ describe("exact edit fast path", () => {
         edits: [{ oldText: "same", newText: "changed" }],
       }),
     ).toBeUndefined();
+  });
+
+  it("reuses a matching preview plan during execution", async () => {
+    const directory = await mkdtemp(join(tmpdir(), "pi-edit-accelerator-"));
+    tempDirectories.push(directory);
+    await writeFile(join(directory, "fixture.txt"), "before\nmiddle\n", "utf8");
+    const input: EditToolInput = {
+      path: "fixture.txt",
+      edits: [{ oldText: "before", newText: "after" }],
+    };
+    const prepared = await tryPrepareExactEdit(input, directory);
+    expect(prepared).toBeDefined();
+
+    const result = await tryExecuteExactEdit(
+      input,
+      undefined,
+      { cwd: directory } as ExtensionContext,
+      prepared,
+    );
+
+    expect(result?.details).toBe(prepared?.result.details);
+    expect(await readFile(join(directory, "fixture.txt"), "utf8")).toBe("after\nmiddle\n");
+  });
+
+  it("invalidates a preview plan when the file changes before execution", async () => {
+    const directory = await mkdtemp(join(tmpdir(), "pi-edit-accelerator-"));
+    tempDirectories.push(directory);
+    const path = join(directory, "fixture.txt");
+    await writeFile(path, "before\nmiddle\n", "utf8");
+    const input: EditToolInput = {
+      path: "fixture.txt",
+      edits: [{ oldText: "before", newText: "after" }],
+    };
+    const prepared = await tryPrepareExactEdit(input, directory);
+    expect(prepared).toBeDefined();
+    await writeFile(path, "before\nmiddle\nexternal change\n", "utf8");
+
+    const result = await tryExecuteExactEdit(
+      input,
+      undefined,
+      { cwd: directory } as ExtensionContext,
+      prepared,
+    );
+
+    expect(result?.details).not.toBe(prepared?.result.details);
+    expect(await readFile(path, "utf8")).toBe("after\nmiddle\nexternal change\n");
+  });
+
+  it("invalidates a preview plan when different bytes decode to the same text", async () => {
+    const directory = await mkdtemp(join(tmpdir(), "pi-edit-accelerator-"));
+    tempDirectories.push(directory);
+    const path = join(directory, "fixture.txt");
+    await writeFile(path, Buffer.from([0xc0, ...Buffer.from("before\n")]));
+    const input: EditToolInput = {
+      path: "fixture.txt",
+      edits: [{ oldText: "before", newText: "after" }],
+    };
+    const prepared = await tryPrepareExactEdit(input, directory);
+    expect(prepared).toBeDefined();
+    await writeFile(path, Buffer.from([0xc1, ...Buffer.from("before\n")]));
+
+    const result = await tryExecuteExactEdit(
+      input,
+      undefined,
+      { cwd: directory } as ExtensionContext,
+      prepared,
+    );
+
+    expect(result?.details).not.toBe(prepared?.result.details);
   });
 
   it("preserves BOM and CRLF and returns built-in-compatible details", async () => {

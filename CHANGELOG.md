@@ -1,5 +1,11 @@
 # Changelog
 
+## Unreleased
+
+- Reuse matching in-flight preview plans during execution after exact file-content validation.
+- Report aggregate preview-plan reuse counts in accelerator statistics.
+- Add a combined interactive preview-and-execution benchmark.
+
 ## 0.1.1 - 2026-09-17
 
 - Reduced exact-edit full-file scans and allocations.
