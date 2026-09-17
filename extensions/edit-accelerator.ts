@@ -6,23 +6,37 @@ import {
 } from "@earendil-works/pi-coding-agent";
 import {
   getExactEditInputKey,
+  getExactEditPathKey,
+  type PrefetchedExactEditFile,
   type PreparedExactEdit,
   tryExecuteExactEdit,
+  tryPrefetchExactEditFile,
   tryPrepareExactEdit,
 } from "../src/exact-edit.ts";
 import { createEditAcceleratorStats, formatEditAcceleratorStats } from "../src/stats.ts";
+
+interface ExpiringPromise<T> {
+  key: string;
+  promise: Promise<T | undefined>;
+  expiration?: ReturnType<typeof setTimeout>;
+}
+
+interface PrefetchPromise extends ExpiringPromise<PrefetchedExactEditFile> {
+  start(): void;
+  cancel(): void;
+}
 
 export default function editAccelerator(pi: ExtensionAPI): void {
   const builtInEdit = createEditToolDefinition(process.cwd());
   const stats = createEditAcceleratorStats();
   const previewStates = new WeakMap<object, { argsKey: string; pending: boolean; fallback: boolean }>();
-  let preparedPreview:
-    | {
-        inputKey: string;
-        promise: Promise<PreparedExactEdit | undefined>;
-        expiration?: ReturnType<typeof setTimeout>;
-      }
-    | undefined;
+  let prefetchedFile: PrefetchPromise | undefined;
+  let preparedPreview: ExpiringPromise<PreparedExactEdit> | undefined;
+  const clearPrefetchedFile = (): void => {
+    if (prefetchedFile?.expiration) clearTimeout(prefetchedFile.expiration);
+    prefetchedFile?.cancel();
+    prefetchedFile = undefined;
+  };
   const clearPreparedPreview = (): void => {
     if (preparedPreview?.expiration) clearTimeout(preparedPreview.expiration);
     preparedPreview = undefined;
@@ -42,15 +56,58 @@ export default function editAccelerator(pi: ExtensionAPI): void {
       }
 
       const component = builtInEdit.renderCall(args, theme, { ...context, argsComplete: false });
+      const input = args as EditToolInput;
+      const pathKey =
+        typeof input?.path === "string" && Array.isArray(input.edits)
+          ? getExactEditPathKey(input.path, context.cwd)
+          : undefined;
+      if (pathKey && !previewState.pending && prefetchedFile?.key !== pathKey) {
+        clearPrefetchedFile();
+        let resolvePrefetch!: (value: PrefetchedExactEditFile | undefined) => void;
+        let started = false;
+        let debounce: ReturnType<typeof setTimeout> | undefined;
+        const candidate: PrefetchPromise = {
+          key: pathKey,
+          promise: new Promise((resolve) => {
+            resolvePrefetch = resolve;
+          }),
+          start() {
+            if (started) return;
+            started = true;
+            if (debounce) clearTimeout(debounce);
+            void tryPrefetchExactEditFile(input.path, context.cwd).then(resolvePrefetch);
+          },
+          cancel() {
+            if (started) return;
+            started = true;
+            if (debounce) clearTimeout(debounce);
+            resolvePrefetch(undefined);
+          },
+        };
+        prefetchedFile = candidate;
+        debounce = setTimeout(() => candidate.start(), 20);
+        debounce.unref();
+        candidate.expiration = setTimeout(() => {
+          if (prefetchedFile === candidate) clearPrefetchedFile();
+        }, 60_000);
+        candidate.expiration.unref();
+      }
       if (context.argsComplete && !previewState.pending) {
         previewState.pending = true;
         const currentState = previewState;
-        const input = args as EditToolInput;
         const inputKey = getExactEditInputKey(input, context.cwd);
-        const preparation = tryPrepareExactEdit(input, context.cwd);
+        const matchingPrefetch = pathKey && prefetchedFile?.key === pathKey ? prefetchedFile : undefined;
+        if (matchingPrefetch) {
+          matchingPrefetch.start();
+          if (matchingPrefetch.expiration) clearTimeout(matchingPrefetch.expiration);
+          prefetchedFile = undefined;
+        }
+        const preparation = matchingPrefetch
+          ? matchingPrefetch.promise.then((prefetched) => tryPrepareExactEdit(input, context.cwd, prefetched))
+          : tryPrepareExactEdit(input, context.cwd);
         clearPreparedPreview();
         if (inputKey) {
-          const candidate: NonNullable<typeof preparedPreview> = { inputKey, promise: preparation };
+          const candidate: ExpiringPromise<PreparedExactEdit> = { key: inputKey, promise: preparation };
           preparedPreview = candidate;
           candidate.expiration = setTimeout(() => {
             if (preparedPreview === candidate) preparedPreview = undefined;
@@ -83,7 +140,7 @@ export default function editAccelerator(pi: ExtensionAPI): void {
     },
     async execute(toolCallId, input: EditToolInput, signal, onUpdate, ctx: ExtensionContext) {
       const inputKey = getExactEditInputKey(input, ctx.cwd);
-      const matchingPreview = inputKey && preparedPreview?.inputKey === inputKey ? preparedPreview : undefined;
+      const matchingPreview = inputKey && preparedPreview?.key === inputKey ? preparedPreview : undefined;
       if (matchingPreview) clearPreparedPreview();
       const prepared = await matchingPreview?.promise;
       const accelerated = matchingPreview
@@ -92,7 +149,9 @@ export default function editAccelerator(pi: ExtensionAPI): void {
       if (accelerated) {
         if (prepared && accelerated.details === prepared.result.details) {
           stats.recordPreviewPlanReuse();
+          if (prepared.prefetched) stats.recordPrefetchedFile();
           if (prepared.positionalWrites) stats.recordPositionalWrite();
+          else if (prepared.suffixWrite) stats.recordSuffixWrite();
         }
         stats.recordAccelerated();
         return accelerated;

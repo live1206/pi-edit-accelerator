@@ -1,3 +1,4 @@
+import { isUtf8 } from "node:buffer";
 import { constants } from "node:fs";
 import { access, open, readFile, writeFile } from "node:fs/promises";
 import { isAbsolute, resolve } from "node:path";
@@ -55,6 +56,17 @@ interface PositionalWrite {
   bytes: Buffer;
 }
 
+interface SuffixWrite {
+  position: number;
+  contentOffset: number;
+  replacementIndex: number;
+}
+
+export interface PrefetchedExactEditFile {
+  absolutePath: string;
+  rawBytes: Buffer;
+}
+
 export interface PreparedExactEdit {
   absolutePath: string;
   inputKey: string;
@@ -63,13 +75,19 @@ export interface PreparedExactEdit {
   lineEnding: "\r\n" | "\n";
   normalizedContent: string;
   replacements: SparseReplacement[];
+  prefetched: boolean;
   positionalWrites?: PositionalWrite[];
+  suffixWrite?: SuffixWrite;
   result: ExactEditResult;
+}
+
+export function getExactEditPathKey(path: string, cwd: string): string | undefined {
+  return resolveOrdinaryPath(path, cwd);
 }
 
 export function getExactEditInputKey(input: EditToolInput, cwd: string): string | undefined {
   if (typeof input?.path !== "string" || !Array.isArray(input.edits)) return undefined;
-  const absolutePath = resolveOrdinaryPath(input.path, cwd);
+  const absolutePath = getExactEditPathKey(input.path, cwd);
   if (!absolutePath) return undefined;
   try {
     return `${absolutePath}\0${JSON.stringify({ path: input.path, edits: input.edits })}`;
@@ -144,30 +162,36 @@ function tryPlanExactEdits(content: string, input: EditToolInput): ExactEditPlan
   };
 }
 
-function buildPositionalWrites(
+function buildSparseWritePlan(
   rawBytes: Buffer,
   content: string,
   normalizedContent: string,
   bom: string,
   replacements: readonly SparseReplacement[],
-): PositionalWrite[] | undefined {
-  if (content !== normalizedContent) return undefined;
+): { positionalWrites?: PositionalWrite[]; suffixWrite?: SuffixWrite } {
+  if (!isUtf8(rawBytes) || content !== normalizedContent) return {};
   const writes: PositionalWrite[] = [];
+  let suffixWrite: SuffixWrite | undefined;
+  let equalByteLengths = true;
   let searchOffset = Buffer.byteLength(bom);
-  for (const replacement of replacements) {
+  for (let index = 0; index < replacements.length; index++) {
+    const replacement = replacements[index]!;
     const oldText = content.slice(
       replacement.matchIndex,
       replacement.matchIndex + replacement.matchLength,
     );
     const oldBytes = Buffer.from(oldText);
     const newBytes = Buffer.from(replacement.newText);
-    if (oldBytes.length !== newBytes.length) return undefined;
     const position = rawBytes.indexOf(oldBytes, searchOffset);
-    if (position === -1) return undefined;
-    if (oldText !== replacement.newText) writes.push({ position, bytes: newBytes });
+    if (position === -1) return {};
+    if (oldText !== replacement.newText) {
+      suffixWrite ??= { position, contentOffset: replacement.matchIndex, replacementIndex: index };
+      if (oldBytes.length === newBytes.length) writes.push({ position, bytes: newBytes });
+      else equalByteLengths = false;
+    }
     searchOffset = position + oldBytes.length;
   }
-  return writes;
+  return equalByteLengths ? { positionalWrites: writes } : { suffixWrite };
 }
 
 async function applyPositionalWrites(
@@ -189,12 +213,17 @@ async function applyPositionalWrites(
   }
 }
 
-function applyPlannedEdits(content: string, replacements: readonly SparseReplacement[]): string {
+function applyPlannedEdits(
+  content: string,
+  replacements: readonly SparseReplacement[],
+  baseOffset = 0,
+): string {
   const parts: string[] = [];
   let contentOffset = 0;
   for (const replacement of replacements) {
-    parts.push(content.slice(contentOffset, replacement.matchIndex), replacement.newText);
-    contentOffset = replacement.matchIndex + replacement.matchLength;
+    const matchIndex = replacement.matchIndex - baseOffset;
+    parts.push(content.slice(contentOffset, matchIndex), replacement.newText);
+    contentOffset = matchIndex + replacement.matchLength;
   }
   parts.push(content.slice(contentOffset));
   return parts.join("");
@@ -205,16 +234,35 @@ export function tryApplyExactEdits(content: string, input: EditToolInput): strin
   return plan && applyPlannedEdits(content, plan.replacements);
 }
 
+export async function tryPrefetchExactEditFile(
+  path: string,
+  cwd: string,
+): Promise<PrefetchedExactEditFile | undefined> {
+  const absolutePath = getExactEditPathKey(path, cwd);
+  if (!absolutePath) return undefined;
+  try {
+    await access(absolutePath, constants.R_OK);
+    return { absolutePath, rawBytes: await readFile(absolutePath) };
+  } catch {
+    return undefined;
+  }
+}
+
 export async function tryPrepareExactEdit(
   input: EditToolInput,
   cwd: string,
+  prefetched?: PrefetchedExactEditFile,
 ): Promise<PreparedExactEdit | undefined> {
   const inputKey = getExactEditInputKey(input, cwd);
   if (!inputKey) return undefined;
   const absolutePath = resolveOrdinaryPath(input.path, cwd)!;
   try {
-    await access(absolutePath, constants.R_OK);
-    const rawBytes = await readFile(absolutePath);
+    let rawBytes: Buffer;
+    if (prefetched?.absolutePath === absolutePath) rawBytes = prefetched.rawBytes;
+    else {
+      await access(absolutePath, constants.R_OK);
+      rawBytes = await readFile(absolutePath);
+    }
     const rawContent = rawBytes.toString("utf8");
     const bom = rawContent.startsWith("\uFEFF") ? "\uFEFF" : "";
     const content = bom ? rawContent.slice(1) : rawContent;
@@ -228,6 +276,13 @@ export async function tryPrepareExactEdit(
       plan.replacements,
       plan.oldLineCount,
     );
+    const sparseWritePlan = buildSparseWritePlan(
+      rawBytes,
+      content,
+      normalizedContent,
+      bom,
+      plan.replacements,
+    );
     return {
       absolutePath,
       inputKey,
@@ -236,7 +291,8 @@ export async function tryPrepareExactEdit(
       lineEnding,
       normalizedContent,
       replacements: plan.replacements,
-      positionalWrites: buildPositionalWrites(rawBytes, content, normalizedContent, bom, plan.replacements),
+      prefetched: prefetched?.absolutePath === absolutePath,
+      ...sparseWritePlan,
       result: {
         content: [
           { type: "text", text: `Successfully replaced ${input.edits.length} block(s) in ${input.path}.` },
@@ -279,13 +335,25 @@ export async function tryExecuteExactEdit(
       prepared?.absolutePath === absolutePath &&
       prepared.inputKey === getExactEditInputKey(input, ctx.cwd);
     let rawBytes: Buffer;
-    if (preparedMatchesInput && prepared.positionalWrites) {
+    if (preparedMatchesInput && (prepared.positionalWrites || prepared.suffixWrite)) {
       const handle = await open(absolutePath, "r+");
       try {
         rawBytes = await handle.readFile();
         if (prepared.rawBytes.equals(rawBytes)) {
           if (signal?.aborted) throw new Error("Operation aborted");
-          await applyPositionalWrites(handle, prepared.positionalWrites);
+          if (prepared.positionalWrites) await applyPositionalWrites(handle, prepared.positionalWrites);
+          else {
+            const suffixWrite = prepared.suffixWrite!;
+            const suffixContent = prepared.normalizedContent.slice(suffixWrite.contentOffset);
+            const suffix = applyPlannedEdits(
+              suffixContent,
+              prepared.replacements.slice(suffixWrite.replacementIndex),
+              suffixWrite.contentOffset,
+            );
+            const suffixBytes = Buffer.from(suffix);
+            await applyPositionalWrites(handle, [{ position: suffixWrite.position, bytes: suffixBytes }]);
+            await handle.truncate(suffixWrite.position + suffixBytes.length);
+          }
           if (signal?.aborted) throw new Error("Operation aborted");
           return prepared.result;
         }

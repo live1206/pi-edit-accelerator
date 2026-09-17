@@ -47,6 +47,7 @@ function renderPreview(
   tool: ReturnType<typeof createEditToolDefinition>,
   directory: string,
   input: EditToolInput,
+  prefetch = false,
 ) {
   if (!tool.renderCall) throw new Error("Extension did not register a call renderer");
   type RenderCall = NonNullable<typeof tool.renderCall>;
@@ -73,12 +74,19 @@ function renderPreview(
       resolvePreview();
     },
   } as unknown as Parameters<RenderCall>[2];
-  const component = tool.renderCall(input, theme, context);
+  const partialComponent = prefetch
+    ? tool.renderCall(
+        { path: input.path, edits: [] },
+        theme,
+        { ...context, argsComplete: false },
+      )
+    : undefined;
+  const component = tool.renderCall(input, theme, { ...context, lastComponent: partialComponent });
   return { component, done };
 }
 
 describe("edit accelerator extension", () => {
-  it("builds an accelerated interactive preview", async () => {
+  it("builds an accelerated interactive preview from a streamed path", async () => {
     initTheme("dark");
     const directory = await createDirectory();
     await writeFile(join(directory, "fixture.txt"), "before\nmiddle\n", "utf8");
@@ -86,7 +94,7 @@ describe("edit accelerator extension", () => {
     const preview = renderPreview(tool, directory, {
       path: "fixture.txt",
       edits: [{ oldText: "before", newText: "after" }],
-    });
+    }, true);
     await preview.done;
 
     expect(preview.component.render(80).join("\n")).toContain("after");
@@ -150,12 +158,41 @@ describe("edit accelerator extension", () => {
       ],
     };
 
-    const extensionResult = await execute(loadExtensionTool(), extensionDirectory, input);
+    const extensionTool = loadExtensionTool();
+    const preview = renderPreview(extensionTool, extensionDirectory, input, true);
+    const [extensionResult] = await Promise.all([
+      execute(extensionTool, extensionDirectory, input),
+      preview.done,
+    ]);
     const builtInResult = await execute(createEditToolDefinition(builtInDirectory), builtInDirectory, input);
 
     expect(extensionResult).toEqual(builtInResult);
     expect(await readFile(join(extensionDirectory, "fixture.txt"), "utf8")).toBe(
       await readFile(join(builtInDirectory, "fixture.txt"), "utf8"),
+    );
+  });
+
+  it("matches built-in byte behavior for invalid UTF-8", async () => {
+    const extensionDirectory = await createDirectory();
+    const builtInDirectory = await createDirectory();
+    const content = Buffer.from([0xc0, ...Buffer.from("before\n")]);
+    await writeFile(join(extensionDirectory, "fixture.txt"), content);
+    await writeFile(join(builtInDirectory, "fixture.txt"), content);
+    const input: EditToolInput = {
+      path: "fixture.txt",
+      edits: [{ oldText: "before", newText: "after!" }],
+    };
+    const extensionTool = loadExtensionTool();
+    const preview = renderPreview(extensionTool, extensionDirectory, input, true);
+    const [extensionResult] = await Promise.all([
+      execute(extensionTool, extensionDirectory, input),
+      preview.done,
+    ]);
+    const builtInResult = await execute(createEditToolDefinition(builtInDirectory), builtInDirectory, input);
+
+    expect(extensionResult).toEqual(builtInResult);
+    expect(await readFile(join(extensionDirectory, "fixture.txt"))).toEqual(
+      await readFile(join(builtInDirectory, "fixture.txt")),
     );
   });
 

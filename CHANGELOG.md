@@ -1,5 +1,12 @@
 # Changelog
 
+## Unreleased
+
+- Prefetch file bytes while edit arguments are still streaming, with debounce and execution-time validation.
+- Rewrite only the affected suffix for eligible length-changing edits.
+- Require valid UTF-8 before sparse writes to preserve built-in byte behavior.
+- Report aggregate prefetch and suffix-write counts and add isolated benchmarks.
+
 ## 0.1.3 - 2026-09-17
 
 - Defer complete output construction until execution needs it.

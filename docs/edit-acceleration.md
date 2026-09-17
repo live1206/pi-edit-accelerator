@@ -80,9 +80,11 @@ Compatibility tests compare all three outputs against Pi's public built-in helpe
 
 The built-in edit renderer normally rereads and diffs the complete file before execution. Candidate C computes the same sparse result asynchronously and feeds it into Pi's built-in renderer, retaining the normal presentation.
 
-Execution shares an in-flight exact-preview plan when the resolved path and complete edit input match. It still rereads the file under Pi's mutation queue and reuses the plan only when the file bytes exactly match the preview input. A changed file is replanned from its current content. Prepared plans expire after 60 seconds and only one plan is retained, bounding memory use.
+Once a complete path and an edits array appear during argument streaming, the extension schedules a debounced file prefetch. Path changes cancel an unstarted read, while argument completion starts it immediately. This overlaps file I/O with the remaining model output without delaying execution.
 
-Preview planning retains sparse replacement offsets but defers complete output construction until execution needs it. If every changed range preserves its UTF-8 byte length and line-ending normalization does not alter offsets, execution opens the file once, verifies all bytes, and writes only the replacement ranges at their raw byte positions. BOM offsets and invalid UTF-8 prefixes are handled using raw-buffer searches. Length-changing and normalized-line-ending edits retain the full-write path.
+Execution shares the resulting in-flight exact-preview plan when the resolved path and complete edit input match. It still rereads the file under Pi's mutation queue and reuses the plan only when the file bytes exactly match the preview input. A changed file is replanned from its current content. Prepared plans expire after 60 seconds and only one plan is retained, bounding memory use.
+
+Preview planning retains sparse replacement offsets but defers complete output construction until execution needs it. For valid UTF-8 files whose line endings require no normalization, execution opens the file once and verifies all bytes. If every changed range preserves its UTF-8 byte length, it writes only those ranges. Otherwise it rewrites from the first changed byte through the new end of file and truncates there. BOM offsets are handled using raw-buffer searches. Invalid UTF-8 and normalized-line-ending edits retain the built-in-compatible full-write path.
 
 Unsupported preview inputs are delegated to the captured built-in preview implementation.
 
@@ -101,7 +103,9 @@ They report only:
 - accelerated calls
 - built-in fallback calls
 - preview plans reused
+- prefetched files
 - positional writes
+- suffix writes
 - fast-path percentage
 
 No paths, arguments, old text, replacement text, or file contents are retained.
@@ -166,7 +170,18 @@ Twenty alternating executions compared the same prepared 5 MB edit with position
 | Full-file materialization and write | 25.16 ms |
 | Verified positional writes | 4.50 ms |
 
-The positional write stage was approximately 82% faster. For the complete interactive lifecycle, an equal-byte-length edit measured 47.05 ms on `v0.1.2` and 26.24 ms on `v0.1.3`, a 44% reduction. Normalizing each extension result against its same-run built-in measurement gives an approximately 46% relative improvement. The positional path is deliberately unavailable when replacement byte lengths differ or line-ending normalization changes offsets.
+The positional write stage was approximately 82% faster. For the complete interactive lifecycle, an equal-byte-length edit measured 47.05 ms on `v0.1.2` and 26.24 ms on `v0.1.3`, a 44% reduction. Normalizing each extension result against its same-run built-in measurement gives an approximately 46% relative improvement.
+
+### Prefetch and suffix-write experiments
+
+With a 50 ms simulated argument-streaming window, prefetch reduced post-argument latency from 37.01 ms to 31.77 ms, approximately 14%. A length-changing edit at byte 5,242,888 used a suffix rewrite instead of a complete write:
+
+| Write strategy | Median execution |
+|---|---:|
+| Complete file | 28.94 ms |
+| Changed suffix | 4.81 ms |
+
+The suffix stage was approximately 83% faster. When the first change was at the beginning of the file, suffix rewriting still reduced complete interactive latency from the prior 48.97 ms to 36.61 ms.
 
 These stress results demonstrate scaling potential. They do not establish normal-session impact; that depends on real file sizes and fast-path frequency.
 
@@ -189,8 +204,11 @@ Current tests cover:
 - in-flight preview-plan reuse
 - exact file-content invalidation before reuse
 - equal-byte-length positional writes
-- raw byte offsets after BOM and invalid UTF-8 prefixes
+- raw byte offsets after BOM
+- invalid UTF-8 fallback to built-in-compatible full-file writes
 - CRLF fallback to full-file writes
+- suffix expansion and truncation
+- stale prefetched-content invalidation and path mismatch
 - abort before positional mutation
 - partial-line and multiline edits
 - insertion and deletion
@@ -230,7 +248,9 @@ The latest execution profile retained 505 samples over approximately 67 ms. Its 
 
 The latest preview profile retained 321 samples over approximately 43 ms. Exact planning used 11.0 ms, normalization eligibility 7.3 ms, UTF-8 decode 5.5 ms, and sparse diff construction only 0.4 ms.
 
-Sparse hunk generation is no longer a meaningful hotspot. Remaining CPU is split across matching, safety checks, decoding, and result assembly. Preview-plan reuse removes duplicate planning from interactive exact edits while retaining an exact file-content check before writes.
+Sparse hunk generation is no longer a meaningful hotspot. Remaining CPU is split across matching, safety checks, decoding, and filesystem work. Preview-plan reuse removes duplicate planning, prefetch overlaps the initial read with argument streaming, and sparse writes reduce output work.
+
+A combined normalization-and-line-discovery scan was also tested. Its self time was 16.37 ms versus approximately 12.45 ms for the existing native-regex and `indexOf` path, and preview median rose to 31.01 ms. That experiment was rejected.
 
 ## Rust decision gate
 
@@ -251,8 +271,8 @@ If no single stage dominates, keep the TypeScript implementation and optimize it
 
 1. Resolve or temporarily disable the competing SoL-Pi Action Fusion edit override.
 2. Run a controlled local pilot and collect aggregate hit/fallback counts.
-3. Collect preview-plan reuse and positional-write rates and watch fallback latency during the pilot.
-4. Combine remaining full-file TypeScript scans where practical.
-5. Rerun scoped execution, preview, and combined interactive profiles.
+3. Collect prefetch, preview-plan reuse, positional-write, and suffix-write rates during the pilot.
+4. Revisit scan fusion only if a lower-overhead implementation becomes available.
+5. Rerun scoped execution, preview, and combined interactive profiles after material changes.
 6. Prototype Rust only if a coarse stage still offers meaningful savings after JS/native conversion.
 7. Validate Node, Bun, Linux, macOS, and Windows before broad installation.

@@ -6,6 +6,7 @@ import { afterEach, describe, expect, it } from "vitest";
 import {
   tryApplyExactEdits,
   tryExecuteExactEdit,
+  tryPrefetchExactEditFile,
   tryPrepareExactEdit,
 } from "../src/exact-edit.ts";
 
@@ -41,6 +42,48 @@ describe("exact edit fast path", () => {
         edits: [{ oldText: "same", newText: "changed" }],
       }),
     ).toBeUndefined();
+  });
+
+  it("prepares from prefetched bytes and revalidates them before execution", async () => {
+    const directory = await mkdtemp(join(tmpdir(), "pi-edit-accelerator-"));
+    tempDirectories.push(directory);
+    const path = join(directory, "fixture.txt");
+    await writeFile(path, "before\nmiddle\n", "utf8");
+    const input: EditToolInput = {
+      path: "fixture.txt",
+      edits: [{ oldText: "before", newText: "after" }],
+    };
+    const prefetched = await tryPrefetchExactEditFile(input.path, directory);
+    expect(prefetched).toBeDefined();
+    await writeFile(path, "before\nmiddle\nexternal change\n", "utf8");
+    const prepared = await tryPrepareExactEdit(input, directory, prefetched);
+    expect(prepared?.rawBytes).toBe(prefetched?.rawBytes);
+
+    const result = await tryExecuteExactEdit(
+      input,
+      undefined,
+      { cwd: directory } as ExtensionContext,
+      prepared,
+    );
+
+    expect(result?.details).not.toBe(prepared?.result.details);
+    expect(await readFile(path, "utf8")).toBe("after\nmiddle\nexternal change\n");
+  });
+
+  it("ignores prefetched bytes for a different path", async () => {
+    const directory = await mkdtemp(join(tmpdir(), "pi-edit-accelerator-"));
+    tempDirectories.push(directory);
+    await writeFile(join(directory, "first.txt"), "first\n", "utf8");
+    await writeFile(join(directory, "second.txt"), "second\n", "utf8");
+    const prefetched = await tryPrefetchExactEditFile("first.txt", directory);
+    const prepared = await tryPrepareExactEdit(
+      { path: "second.txt", edits: [{ oldText: "second", newText: "changed" }] },
+      directory,
+      prefetched,
+    );
+
+    expect(prepared?.absolutePath).toBe(join(directory, "second.txt"));
+    expect(prepared?.rawBytes.toString("utf8")).toBe("second\n");
   });
 
   it("reuses a matching preview plan during execution", async () => {
@@ -90,6 +133,38 @@ describe("exact edit fast path", () => {
     expect(await readFile(path, "utf8")).toBe("\uFEFFé after!\nlast\n");
   });
 
+  it("rewrites only the suffix for a length-changing edit", async () => {
+    const directory = await mkdtemp(join(tmpdir(), "pi-edit-accelerator-"));
+    tempDirectories.push(directory);
+    const path = join(directory, "fixture.txt");
+    await writeFile(path, "prefix\nbefore\nlast\n", "utf8");
+    const input: EditToolInput = {
+      path: "fixture.txt",
+      edits: [{ oldText: "before", newText: "changed value" }],
+    };
+    const prepared = await tryPrepareExactEdit(input, directory);
+
+    expect(prepared?.suffixWrite?.position).toBe(7);
+    await tryExecuteExactEdit(input, undefined, { cwd: directory } as ExtensionContext, prepared);
+    expect(await readFile(path, "utf8")).toBe("prefix\nchanged value\nlast\n");
+  });
+
+  it("truncates the file after a shorter suffix rewrite", async () => {
+    const directory = await mkdtemp(join(tmpdir(), "pi-edit-accelerator-"));
+    tempDirectories.push(directory);
+    const path = join(directory, "fixture.txt");
+    await writeFile(path, "prefix\nbefore and trailing content\n", "utf8");
+    const input: EditToolInput = {
+      path: "fixture.txt",
+      edits: [{ oldText: "before and trailing content", newText: "after" }],
+    };
+    const prepared = await tryPrepareExactEdit(input, directory);
+
+    expect(prepared?.suffixWrite?.position).toBe(7);
+    await tryExecuteExactEdit(input, undefined, { cwd: directory } as ExtensionContext, prepared);
+    expect(await readFile(path, "utf8")).toBe("prefix\nafter\n");
+  });
+
   it("uses full-file writes when line-ending normalization changes offsets", async () => {
     const directory = await mkdtemp(join(tmpdir(), "pi-edit-accelerator-"));
     tempDirectories.push(directory);
@@ -102,6 +177,7 @@ describe("exact edit fast path", () => {
     const prepared = await tryPrepareExactEdit(input, directory);
 
     expect(prepared?.positionalWrites).toBeUndefined();
+    expect(prepared?.suffixWrite).toBeUndefined();
     await tryExecuteExactEdit(input, undefined, { cwd: directory } as ExtensionContext, prepared);
     expect(await readFile(path, "utf8")).toBe("after!\r\nlast\r\n");
   });
@@ -149,7 +225,7 @@ describe("exact edit fast path", () => {
     expect(await readFile(path, "utf8")).toBe("after!\nmiddle\nexternal change\n");
   });
 
-  it("uses raw byte positions when invalid UTF-8 precedes a replacement", async () => {
+  it("uses the built-in-compatible full write for invalid UTF-8", async () => {
     const directory = await mkdtemp(join(tmpdir(), "pi-edit-accelerator-"));
     tempDirectories.push(directory);
     const path = join(directory, "fixture.txt");
@@ -160,9 +236,10 @@ describe("exact edit fast path", () => {
     };
     const prepared = await tryPrepareExactEdit(input, directory);
 
-    expect(prepared?.positionalWrites?.[0]?.position).toBe(1);
+    expect(prepared?.positionalWrites).toBeUndefined();
+    expect(prepared?.suffixWrite).toBeUndefined();
     await tryExecuteExactEdit(input, undefined, { cwd: directory } as ExtensionContext, prepared);
-    expect(await readFile(path)).toEqual(Buffer.from([0xc0, ...Buffer.from("after!\n")]));
+    expect(await readFile(path)).toEqual(Buffer.from("�after!\n"));
   });
 
   it("invalidates a preview plan when different bytes decode to the same text", async () => {
