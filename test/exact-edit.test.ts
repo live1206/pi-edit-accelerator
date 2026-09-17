@@ -44,6 +44,31 @@ describe("exact edit fast path", () => {
     ).toBeUndefined();
   });
 
+  it("retains the Unicode normalization check for non-ASCII files", async () => {
+    const directory = await mkdtemp(join(tmpdir(), "pi-edit-accelerator-"));
+    tempDirectories.push(directory);
+    await writeFile(join(directory, "fixture.txt"), "é before\n", "utf8");
+    const input: EditToolInput = {
+      path: "fixture.txt",
+      edits: [{ oldText: "before", newText: "after" }],
+    };
+
+    const prepared = await tryPrepareExactEdit(input, directory);
+    expect(prepared).toBeDefined();
+  });
+
+  it("does not bypass fuzzy safety for ASCII trailing whitespace", async () => {
+    const directory = await mkdtemp(join(tmpdir(), "pi-edit-accelerator-"));
+    tempDirectories.push(directory);
+    await writeFile(join(directory, "fixture.txt"), "before  \nafter\t", "utf8");
+    const input: EditToolInput = {
+      path: "fixture.txt",
+      edits: [{ oldText: "before", newText: "changed" }],
+    };
+
+    expect(await tryPrepareExactEdit(input, directory)).toBeUndefined();
+  });
+
   it("prepares from prefetched bytes and revalidates them before execution", async () => {
     const directory = await mkdtemp(join(tmpdir(), "pi-edit-accelerator-"));
     tempDirectories.push(directory);

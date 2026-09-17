@@ -252,6 +252,8 @@ Sparse hunk generation is no longer a meaningful hotspot. Remaining CPU is split
 
 A combined normalization-and-line-discovery scan was also tested. Its self time was 16.37 ms versus approximately 12.45 ms for the existing native-regex and `indexOf` path, and preview median rose to 31.01 ms. That experiment was rejected.
 
+A narrower ASCII experiment was retained. Native `isAscii` validation used 0.23 ms and allowed the 7.37 ms Unicode-normalization scan to be skipped; trailing whitespace is checked during existing line discovery. Against the immediately preceding revision, preview median decreased from 22.42 ms to 20.08 ms, approximately 10%.
+
 ## Rust decision gate
 
 Do not add Rust solely because candidate C still has measurable latency. A native backend is justified only if profiling shows a substantial CPU-bound region that Rust can replace through one coarse call.

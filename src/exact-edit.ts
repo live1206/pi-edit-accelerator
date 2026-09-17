@@ -1,4 +1,4 @@
-import { isUtf8 } from "node:buffer";
+import { isAscii, isUtf8 } from "node:buffer";
 import { constants } from "node:fs";
 import { access, open, readFile, writeFile } from "node:fs/promises";
 import { isAbsolute, resolve } from "node:path";
@@ -96,9 +96,17 @@ export function getExactEditInputKey(input: EditToolInput, cwd: string): string 
   }
 }
 
-function tryPlanExactEdits(content: string, input: EditToolInput): ExactEditPlan | undefined {
+function isAsciiWhitespaceExceptLf(code: number): boolean {
+  return code === 9 || code === 11 || code === 12 || code === 13 || code === 32;
+}
+
+function tryPlanExactEdits(
+  content: string,
+  input: EditToolInput,
+  contentIsAscii = false,
+): ExactEditPlan | undefined {
   if (!Array.isArray(input.edits) || input.edits.length === 0) return undefined;
-  if (!isFuzzyNormalizationNeutral(content)) return undefined;
+  if (!contentIsAscii && !isFuzzyNormalizationNeutral(content)) return undefined;
 
   const matches: Array<{
     index: number;
@@ -129,6 +137,7 @@ function tryPlanExactEdits(content: string, input: EditToolInput): ExactEditPlan
 
     let newline = content.indexOf("\n", lineScanOffset);
     while (newline !== -1 && newline < current.index) {
+      if (contentIsAscii && isAsciiWhitespaceExceptLf(content.charCodeAt(newline - 1))) return undefined;
       currentLine++;
       lineScanOffset = newline + 1;
       newline = content.indexOf("\n", lineScanOffset);
@@ -136,6 +145,7 @@ function tryPlanExactEdits(content: string, input: EditToolInput): ExactEditPlan
     current.firstLine = currentLine;
     const finalMatchedIndex = current.index + current.length - 1;
     while (newline !== -1 && newline < finalMatchedIndex) {
+      if (contentIsAscii && isAsciiWhitespaceExceptLf(content.charCodeAt(newline - 1))) return undefined;
       currentLine++;
       lineScanOffset = newline + 1;
       newline = content.indexOf("\n", lineScanOffset);
@@ -144,11 +154,19 @@ function tryPlanExactEdits(content: string, input: EditToolInput): ExactEditPlan
   }
   let remainingNewline = content.indexOf("\n", lineScanOffset);
   while (remainingNewline !== -1) {
+    if (contentIsAscii && isAsciiWhitespaceExceptLf(content.charCodeAt(remainingNewline - 1))) return undefined;
     currentLine++;
     lineScanOffset = remainingNewline + 1;
     remainingNewline = content.indexOf("\n", lineScanOffset);
   }
 
+  if (
+    contentIsAscii &&
+    !content.endsWith("\n") &&
+    isAsciiWhitespaceExceptLf(content.charCodeAt(content.length - 1))
+  ) {
+    return undefined;
+  }
   if (!hasChange) return undefined;
   return {
     oldLineCount: currentLine + 1,
@@ -268,7 +286,8 @@ export async function tryPrepareExactEdit(
     const content = bom ? rawContent.slice(1) : rawContent;
     const lineEnding = detectLineEnding(content);
     const normalizedContent = normalizeToLf(content);
-    const plan = tryPlanExactEdits(normalizedContent, input);
+    const contentIsAscii = isAscii(rawBytes.subarray(Buffer.byteLength(bom)));
+    const plan = tryPlanExactEdits(normalizedContent, input, contentIsAscii);
     if (!plan) return undefined;
     const details = buildSparseDiffs(
       input.path,
@@ -380,7 +399,8 @@ export async function tryExecuteExactEdit(
     const content = bom ? rawContent.slice(1) : rawContent;
     const lineEnding = detectLineEnding(content);
     const normalizedContent = normalizeToLf(content);
-    const plan = tryPlanExactEdits(normalizedContent, input);
+    const contentIsAscii = isAscii(rawBytes.subarray(Buffer.byteLength(bom)));
+    const plan = tryPlanExactEdits(normalizedContent, input, contentIsAscii);
     if (plan === undefined) return undefined;
 
     const sparseDiffs = buildSparseDiffs(
