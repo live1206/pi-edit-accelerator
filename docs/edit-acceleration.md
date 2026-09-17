@@ -134,10 +134,10 @@ Twenty alternating measured runs after three warmups from commit `b8fe59b`:
 
 | Implementation | Median | p95 | Mean |
 |---|---:|---:|---:|
-| Built-in A | 401.93 ms | 506.17 ms | 414.26 ms |
-| Sparse extension C | 40.87 ms | 47.01 ms | 43.28 ms |
+| Built-in A | 410.44 ms | 501.56 ms | 426.51 ms |
+| Sparse extension C | 34.45 ms | 40.75 ms | 36.60 ms |
 
-Version 0.1.3 reduced median execution latency by approximately 90% on this stress fixture.
+Version 0.1.4 reduced median execution latency by approximately 92% on this stress fixture.
 
 ### Interactive preview benchmark
 
@@ -145,8 +145,8 @@ Ten alternating runs:
 
 | Preview | Median |
 |---|---:|
-| Built-in | 277.91 ms |
-| Sparse extension | 23.14 ms |
+| Built-in | 287.59 ms |
+| Sparse extension | 16.64 ms |
 
 The preview result is exploratory but confirms that sparse preview removes most of the separate interactive diff cost.
 
@@ -167,21 +167,21 @@ Twenty alternating executions compared the same prepared 5 MB edit with position
 
 | Write strategy | Median execution |
 |---|---:|
-| Full-file materialization and write | 25.16 ms |
+| Full-file materialization and write | 28.32 ms |
 | Verified positional writes | 4.50 ms |
 
-The positional write stage was approximately 82% faster. For the complete interactive lifecycle, an equal-byte-length edit measured 47.05 ms on `v0.1.2` and 26.24 ms on `v0.1.3`, a 44% reduction. Normalizing each extension result against its same-run built-in measurement gives an approximately 46% relative improvement.
+The positional write stage was approximately 84% faster. For the complete interactive lifecycle, an equal-byte-length edit measured 26.24 ms on `v0.1.3` and 16.62 ms on `v0.1.4`, a further 37% reduction.
 
 ### Prefetch and suffix-write experiments
 
-With a 50 ms simulated argument-streaming window, prefetch reduced post-argument latency from 37.01 ms to 31.77 ms, approximately 14%. A length-changing edit at byte 5,242,888 used a suffix rewrite instead of a complete write:
+With a 50 ms simulated argument-streaming window, prefetch reduced post-argument latency from 33.30 ms to 27.22 ms, approximately 18%. A length-changing edit at byte 5,242,888 used a suffix rewrite instead of a complete write:
 
 | Write strategy | Median execution |
 |---|---:|
-| Complete file | 28.94 ms |
-| Changed suffix | 4.81 ms |
+| Complete file | 26.91 ms |
+| Changed suffix | 5.67 ms |
 
-The suffix stage was approximately 83% faster. When the first change was at the beginning of the file, suffix rewriting still reduced complete interactive latency from the prior 48.97 ms to 36.61 ms.
+The suffix stage was approximately 79% faster. When the first change was at the beginning of the file, version 0.1.4 measured 31.42 ms for the complete interactive lifecycle.
 
 These stress results demonstrate scaling potential. They do not establish normal-session impact; that depends on real file sizes and fast-path frequency.
 

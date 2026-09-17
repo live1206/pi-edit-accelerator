@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.1.4 - 2026-09-17
 
 - Prefetch file bytes while edit arguments are still streaming, with debounce and execution-time validation.
 - Rewrite only the affected suffix for eligible length-changing edits.

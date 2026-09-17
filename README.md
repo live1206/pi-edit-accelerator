@@ -21,19 +21,19 @@ Clean benchmark on Node 22.23.2, Pi 0.85.1, Linux/WSL2, AMD EPYC 7763, using a 5
 
 | Execution | Median | p95 |
 |---|---:|---:|
-| Pi built-in edit | 401.93 ms | 506.17 ms |
-| Sparse extension | 40.87 ms | 47.01 ms |
+| Pi built-in edit | 410.44 ms | 501.56 ms |
+| Sparse extension | 34.45 ms | 40.75 ms |
 
-Version 0.1.3 reduced median execution latency by approximately 90% on this stress fixture.
+Version 0.1.4 reduced median execution latency by approximately 92% on this stress fixture.
 
 An exploratory interactive-preview benchmark measured:
 
 | Preview | Median |
 |---|---:|
-| Pi built-in preview | 277.91 ms |
-| Sparse extension preview | 23.14 ms |
+| Pi built-in preview | 287.59 ms |
+| Sparse extension preview | 16.64 ms |
 
-For equal-byte-length replacements, positional writes reduced median preview-to-write latency from 47.05 ms in version 0.1.2 to 26.24 ms in version 0.1.3.
+Version 0.1.4 measured 31.42 ms preview-to-write latency for length-changing replacements and 16.62 ms for equal-byte-length positional replacements.
 
 These results demonstrate large-file scaling potential, not guaranteed gains for every edit. Normal-session impact depends on file sizes and fast-path frequency.
 
@@ -42,13 +42,13 @@ These results demonstrate large-file scaling potential, not guaranteed gains for
 Install from the public GitHub repository:
 
 ```sh
-pi install git:github.com/live1206/pi-edit-accelerator@v0.1.3
+pi install git:github.com/live1206/pi-edit-accelerator@v0.1.4
 ```
 
 Try it for one run without changing settings:
 
 ```sh
-pi -e git:github.com/live1206/pi-edit-accelerator@v0.1.3
+pi -e git:github.com/live1206/pi-edit-accelerator@v0.1.4
 ```
 
 Restart Pi or run `/reload` after installation.
@@ -56,7 +56,7 @@ Restart Pi or run `/reload` after installation.
 Remove it with:
 
 ```sh
-pi remove git:github.com/live1206/pi-edit-accelerator@v0.1.3
+pi remove git:github.com/live1206/pi-edit-accelerator@v0.1.4
 ```
 
 Pi packages execute with full system access. Review the source before installation.
