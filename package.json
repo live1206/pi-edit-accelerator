@@ -1,10 +1,26 @@
 {
   "name": "@live1206/pi-edit-accelerator",
   "version": "0.1.0",
-  "private": true,
+  "description": "A sparse exact-edit and diff accelerator extension for Pi",
   "type": "module",
+  "license": "MIT",
+  "author": "Wei Hu",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/live1206/pi-edit-accelerator.git"
+  },
+  "files": [
+    "docs",
+    "extensions",
+    "src",
+    "README.md",
+    "LICENSE"
+  ],
   "keywords": [
-    "pi-package"
+    "pi-package",
+    "pi-extension",
+    "performance",
+    "edit"
   ],
   "pi": {
     "extensions": [
