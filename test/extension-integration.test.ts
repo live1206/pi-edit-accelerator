@@ -92,21 +92,21 @@ describe("edit accelerator extension", () => {
     expect(preview.component.render(80).join("\n")).toContain("after");
   });
 
-  it("shares an in-flight preview with execution", async () => {
+  it("shares an in-flight preview with positional execution", async () => {
     initTheme("dark");
     const directory = await createDirectory();
     await writeFile(join(directory, "fixture.txt"), "before\nmiddle\n", "utf8");
     const input: EditToolInput = {
       path: "fixture.txt",
-      edits: [{ oldText: "before", newText: "after" }],
+      edits: [{ oldText: "before", newText: "after!" }],
     };
     const tool = loadExtensionTool();
 
     const preview = renderPreview(tool, directory, input);
     const [result] = await Promise.all([execute(tool, directory, input), preview.done]);
 
-    expect(result.details?.diff).toContain("+1 after");
-    expect(await readFile(join(directory, "fixture.txt"), "utf8")).toBe("after\nmiddle\n");
+    expect(result.details?.diff).toContain("+1 after!");
+    expect(await readFile(join(directory, "fixture.txt"), "utf8")).toBe("after!\nmiddle\n");
   });
 
   it("registers one edit override with the built-in contract", () => {

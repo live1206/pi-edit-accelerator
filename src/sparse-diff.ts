@@ -117,7 +117,6 @@ function buildDisplayDiff(
 export function buildSparseDiffs(
   path: string,
   oldContent: string,
-  newContent: string,
   replacements: readonly SparseReplacement[],
   oldLineCount: number,
   contextLines = 4,

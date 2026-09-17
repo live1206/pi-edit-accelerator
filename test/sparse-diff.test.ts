@@ -32,7 +32,7 @@ function plan(oldContent: string, edits: readonly TextReplacement[]): { newConte
 
 function compare(oldContent: string, edits: readonly TextReplacement[], path = "fixture.txt"): void {
   const { newContent, replacements } = plan(oldContent, edits);
-  const sparse = buildSparseDiffs(path, oldContent, newContent, replacements, oldContent.split("\n").length);
+  const sparse = buildSparseDiffs(path, oldContent, replacements, oldContent.split("\n").length);
   const builtIn = generateDiffString(oldContent, newContent);
   expect(sparse.diff).toBe(builtIn.diff);
   expect(sparse.firstChangedLine).toBe(builtIn.firstChangedLine);

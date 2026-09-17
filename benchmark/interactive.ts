@@ -46,11 +46,12 @@ function makeFixture(): string {
   return `FIRST_MARKER\n${"0123456789abcdef0123456789abcdef\n".repeat(158_875)}LAST_MARKER\n`;
 }
 
+const equalByteLength = process.argv.includes("--equal-byte-length");
 const input: EditToolInput = {
   path: "large.txt",
   edits: [
-    { oldText: "FIRST_MARKER", newText: "FIRST_CHANGED" },
-    { oldText: "LAST_MARKER", newText: "LAST_CHANGED" },
+    { oldText: "FIRST_MARKER", newText: equalByteLength ? "FIRST_CHANGE" : "FIRST_CHANGED" },
+    { oldText: "LAST_MARKER", newText: equalByteLength ? "LAST_CHANGE" : "LAST_CHANGED" },
   ],
 };
 
@@ -128,6 +129,7 @@ process.stdout.write(
     {
       runs: 10,
       fixtureBytes: Buffer.byteLength(makeFixture()),
+      equalByteLength,
       builtIn: {
         total: summarize(builtInSamples.map((sample) => sample.totalMs)),
         execution: summarize(builtInSamples.map((sample) => sample.executionMs)),

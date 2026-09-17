@@ -90,7 +90,10 @@ export default function editAccelerator(pi: ExtensionAPI): void {
         ? prepared && (await tryExecuteExactEdit(input, signal, ctx, prepared))
         : await tryExecuteExactEdit(input, signal, ctx);
       if (accelerated) {
-        if (prepared && accelerated.details === prepared.result.details) stats.recordPreviewPlanReuse();
+        if (prepared && accelerated.details === prepared.result.details) {
+          stats.recordPreviewPlanReuse();
+          if (prepared.positionalWrites) stats.recordPositionalWrite();
+        }
         stats.recordAccelerated();
         return accelerated;
       }

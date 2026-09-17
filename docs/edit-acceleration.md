@@ -82,6 +82,8 @@ The built-in edit renderer normally rereads and diffs the complete file before e
 
 Execution shares an in-flight exact-preview plan when the resolved path and complete edit input match. It still rereads the file under Pi's mutation queue and reuses the plan only when the file bytes exactly match the preview input. A changed file is replanned from its current content. Prepared plans expire after 60 seconds and only one plan is retained, bounding memory use.
 
+Preview planning retains sparse replacement offsets but defers complete output construction until execution needs it. If every changed range preserves its UTF-8 byte length and line-ending normalization does not alter offsets, execution opens the file once, verifies all bytes, and writes only the replacement ranges at their raw byte positions. BOM offsets and invalid UTF-8 prefixes are handled using raw-buffer searches. Length-changing and normalized-line-ending edits retain the full-write path.
+
 Unsupported preview inputs are delegated to the captured built-in preview implementation.
 
 ## Observability
@@ -99,6 +101,7 @@ They report only:
 - accelerated calls
 - built-in fallback calls
 - preview plans reused
+- positional writes
 - fast-path percentage
 
 No paths, arguments, old text, replacement text, or file contents are retained.
@@ -154,6 +157,17 @@ Ten alternating 5 MB runs start preview and execution in the same order as Pi's 
 
 Version 0.1.2 reduced median interactive latency by approximately 34%. Normalizing each extension result against the built-in measurement from the same run gives an approximately 36% relative improvement, reducing the effect of machine-load variation between benchmark runs.
 
+### Equal-byte-length positional writes
+
+Twenty alternating executions compared the same prepared 5 MB edit with positional writes enabled and deliberately disabled:
+
+| Write strategy | Median execution |
+|---|---:|
+| Full-file materialization and write | 26.67 ms |
+| Verified positional writes | 4.64 ms |
+
+The positional write stage was approximately 83% faster. For the complete interactive lifecycle, an equal-byte-length edit measured 47.05 ms on `v0.1.2` and 23.52 ms with positional writes, a 50% reduction. The positional path is deliberately unavailable when replacement byte lengths differ or line-ending normalization changes offsets.
+
 These stress results demonstrate scaling potential. They do not establish normal-session impact; that depends on real file sizes and fast-path frequency.
 
 ## Edit override compatibility
@@ -174,6 +188,10 @@ Current tests cover:
 - sparse preview rendering
 - in-flight preview-plan reuse
 - exact file-content invalidation before reuse
+- equal-byte-length positional writes
+- raw byte offsets after BOM and invalid UTF-8 prefixes
+- CRLF fallback to full-file writes
+- abort before positional mutation
 - partial-line and multiline edits
 - insertion and deletion
 - nearby and distant hunks
@@ -233,7 +251,7 @@ If no single stage dominates, keep the TypeScript implementation and optimize it
 
 1. Resolve or temporarily disable the competing SoL-Pi Action Fusion edit override.
 2. Run a controlled local pilot and collect aggregate hit/fallback counts.
-3. Collect preview-plan reuse rates and watch fallback latency during the pilot.
+3. Collect preview-plan reuse and positional-write rates and watch fallback latency during the pilot.
 4. Combine remaining full-file TypeScript scans where practical.
 5. Rerun scoped execution, preview, and combined interactive profiles.
 6. Prototype Rust only if a coarse stage still offers meaningful savings after JS/native conversion.

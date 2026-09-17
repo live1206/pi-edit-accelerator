@@ -71,7 +71,8 @@ The sparse backend supports normalization-neutral, globally unique exact replace
 - LF and CRLF files;
 - UTF-8 BOM preservation;
 - files with or without a trailing newline;
-- multibyte UTF-8 text.
+- multibyte UTF-8 text;
+- positional writes when every replacement preserves its UTF-8 byte length.
 
 All edits are matched against the original content. The extension preserves Pi-compatible file output, display diff, unified patch, and `firstChangedLine`.
 
@@ -90,7 +91,7 @@ Use these process-local commands during a session:
 /edit-accelerator-reset-stats
 ```
 
-They report only total, accelerated, fallback, and preview-plan reuse counts plus the fast-path percentage. No paths, arguments, replacement text, or file contents are retained.
+They report only total, accelerated, fallback, preview-plan reuse, and positional-write counts plus the fast-path percentage. No paths, arguments, replacement text, or file contents are retained.
 
 ## Other edit overrides
 
@@ -122,6 +123,7 @@ Benchmarks:
 npm run bench:a-vs-b -- --runs 20 --warmup 3
 npm run bench:preview
 npm run bench:interactive
+npm run bench:positional-write
 npm run profile -- --mode execution --output .artifacts/execution.cpuprofile --report .artifacts/execution-profile.json
 npm run profile:analyze -- .artifacts/execution.cpuprofile --output .artifacts/execution-analysis.json
 ```

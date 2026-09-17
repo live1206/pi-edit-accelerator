@@ -8,6 +8,7 @@ describe("edit accelerator statistics", () => {
     stats.recordAccelerated();
     stats.recordFallback();
     stats.recordPreviewPlanReuse();
+    stats.recordPositionalWrite();
 
     const snapshot = stats.snapshot();
     expect(snapshot).toMatchObject({
@@ -15,9 +16,11 @@ describe("edit accelerator statistics", () => {
       acceleratedCalls: 2,
       fallbackCalls: 1,
       previewPlanReuses: 1,
+      positionalWrites: 1,
     });
     expect(snapshot.acceleratedPercent).toBeCloseTo(200 / 3);
     expect(formatEditAcceleratorStats(snapshot)).toContain("Preview plans reused: 1");
+    expect(formatEditAcceleratorStats(snapshot)).toContain("Positional writes: 1");
     expect(formatEditAcceleratorStats(snapshot)).toContain("Fast-path rate: 66.7%");
   });
 
@@ -30,6 +33,7 @@ describe("edit accelerator statistics", () => {
       acceleratedCalls: 0,
       fallbackCalls: 0,
       previewPlanReuses: 0,
+      positionalWrites: 0,
       acceleratedPercent: 0,
     });
   });

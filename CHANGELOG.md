@@ -1,5 +1,11 @@
 # Changelog
 
+## Unreleased
+
+- Defer complete output construction until execution needs it.
+- Write eligible equal-byte-length edits directly at their verified byte positions.
+- Report aggregate positional-write counts and add an isolated positional-write benchmark.
+
 ## 0.1.2 - 2026-09-17
 
 - Reuse matching in-flight preview plans during execution after exact file-content validation.
