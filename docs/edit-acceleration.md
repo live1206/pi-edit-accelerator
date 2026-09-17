@@ -170,34 +170,33 @@ Current tests cover:
 
 Before broad rollout, add focused coverage for permission failures, symlinks, abort timing, concurrent edits, malformed previews, and platform-specific paths.
 
-## Next step: CPU profile candidate C
+## CPU profile results
 
-The next question is whether the remaining approximately 134 ms stress latency contains enough local CPU cost to justify Rust.
+Scoped profiles verify built-in output equivalence before capture and measure execution and preview separately. The profiler uses a requested 10 µs interval and removes the initial inspector delay from the retained profile.
 
-Profile the actual extension path, including:
+Three isolated TypeScript scan experiments were measured against the same 5 MB fixture:
 
-```text
-extension dispatch
-file read and UTF-8 conversion
-normalization eligibility scan
-exact match and uniqueness scans
-line-range discovery
-sparse local diff construction
-result conversion
-file write
-```
+| Version | Execution wall | Preview wall | Result |
+|---|---:|---:|---|
+| allocation-light normalization baseline | 102 ms | 72 ms | retained |
+| one ASCII normalization eligibility scan | 96 ms | 75 ms | about 5 ms CPU reduction; retained |
+| local hunk-boundary lookup instead of a full line-start array | 70 ms | 40 ms | major reduction; retained |
+| one-pass replacement assembly | 66 ms | 42 ms | small execution reduction; retained |
 
-Collect:
+The latest execution profile retained 505 samples over approximately 67 ms. Its largest self-time stages were:
 
-- module and function self CPU time
-- inclusive CPU time
-- garbage-collection samples
-- wall time
-- allocation pressure where practical
-- input and output byte sizes
-- number and shape of edits
+| Function or stage | Self CPU |
+|---|---:|
+| exact edit planning | 16.2 ms |
+| UTF-8 decode | 11.9 ms |
+| extension execution wrapper and assembly | 8.8 ms |
+| fuzzy-normalization eligibility | 7.8 ms |
+| idle / I/O wait | 15.3 ms |
+| garbage collection | 1.9 ms |
 
-Profile execution and preview separately. Use the committed TypeScript implementation and verify result equivalence before each timed run.
+The latest preview profile retained 321 samples over approximately 43 ms. Exact planning used 11.0 ms, normalization eligibility 7.3 ms, UTF-8 decode 5.5 ms, and sparse diff construction only 0.4 ms.
+
+Sparse hunk generation is no longer a meaningful hotspot. Remaining CPU is split across matching, safety checks, decoding, and result assembly. A likely next TypeScript experiment is caching a verified sparse preview plan for execution, with an exact file-content check to prevent reuse after concurrent changes.
 
 ## Rust decision gate
 
@@ -218,8 +217,8 @@ If no single stage dominates, keep the TypeScript implementation and optimize it
 
 1. Resolve or temporarily disable the competing SoL-Pi Action Fusion edit override.
 2. Run a controlled local pilot and collect aggregate hit/fallback counts.
-3. Capture scoped CPU profiles for sparse execution and preview.
-4. Optimize obvious TypeScript scan duplication identified by the profile.
+3. Combine remaining full-file TypeScript scans where practical.
+4. Rerun scoped execution and preview profiles.
 5. Rerun clean A/C benchmarks.
-6. Prototype Rust only if meaningful CPU remains after the TypeScript pass.
+6. Prototype Rust only if a coarse stage still offers meaningful savings after JS/native conversion.
 7. Validate Node, Bun, Linux, macOS, and Windows before broad installation.

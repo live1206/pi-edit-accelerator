@@ -121,6 +121,8 @@ Benchmarks:
 ```sh
 npm run bench:a-vs-b -- --runs 20 --warmup 3
 npm run bench:preview
+npm run profile -- --mode execution --output .artifacts/execution.cpuprofile --report .artifacts/execution-profile.json
+npm run profile:analyze -- .artifacts/execution.cpuprofile --output .artifacts/execution-analysis.json
 ```
 
 The test suite compares sparse output with Pi's built-in result, display diff, unified patch, and final file bytes.
@@ -140,10 +142,10 @@ See [docs/edit-acceleration.md](docs/edit-acceleration.md) for:
 
 1. Collect real-session accelerated/fallback rates.
 2. Add permission, symlink, abort, concurrency, malformed-preview, and cross-platform tests.
-3. Profile candidate-C execution and preview CPU usage.
-4. Combine remaining full-file scans where profiling justifies it.
-5. Rerun clean benchmarks on Linux, macOS, Windows, Node, and Bun.
-6. Prototype Rust only if a coarse CPU-bound stage still dominates after TypeScript optimization.
+3. Combine the remaining normalization, matching, and line-index scans where practical.
+4. Rerun candidate-C execution and preview profiles and clean benchmarks.
+5. Validate Linux, macOS, Windows, Node, and Bun.
+6. Prototype Rust only if a coarse CPU-bound stage still offers meaningful savings after JS/native conversion.
 
 ## License
 

@@ -28,16 +28,16 @@ function detectLineEnding(content: string): "\r\n" | "\n" {
   return crlf !== -1 && crlf === lf - 1 ? "\r\n" : "\n";
 }
 
-function normalizeForFuzzyMatch(text: string): string {
-  return text
-    .normalize("NFKC")
-    .split("\n")
-    .map((line) => line.trimEnd())
-    .join("\n")
-    .replace(/[\u2018\u2019\u201A\u201B]/g, "'")
-    .replace(/[\u201C\u201D\u201E\u201F]/g, '"')
-    .replace(/[\u2010\u2011\u2012\u2013\u2014\u2015\u2212]/g, "-")
-    .replace(/[\u00A0\u2002-\u200A\u202F\u205F\u3000]/g, " ");
+const trailingWhitespacePattern = /[^\S\n]+(?=\n|$)/u;
+const fuzzySpecialCharacterPattern = /[\u2018\u2019\u201A\u201B\u201C\u201D\u201E\u201F\u2010-\u2015\u2212\u00A0\u2002-\u200A\u202F\u205F\u3000]/u;
+const normalizationCandidatePattern = /([^\S\n]+(?=\n|$))|([^\x00-\x7F])/u;
+
+function isFuzzyNormalizationNeutral(text: string): boolean {
+  const candidate = normalizationCandidatePattern.exec(text);
+  if (!candidate) return true;
+  if (candidate[1] !== undefined) return false;
+  if (trailingWhitespacePattern.test(text) || fuzzySpecialCharacterPattern.test(text)) return false;
+  return text.normalize("NFKC") === text;
 }
 
 function resolveOrdinaryPath(path: string, cwd: string): string | undefined {
@@ -48,11 +48,12 @@ function resolveOrdinaryPath(path: string, cwd: string): string | undefined {
 interface ExactEditPlan {
   newContent: string;
   replacements: SparseReplacement[];
+  oldLineCount: number;
 }
 
 function tryPlanExactEdits(content: string, input: EditToolInput): ExactEditPlan | undefined {
   if (!Array.isArray(input.edits) || input.edits.length === 0) return undefined;
-  if (normalizeForFuzzyMatch(content) !== content) return undefined;
+  if (!isFuzzyNormalizationNeutral(content)) return undefined;
 
   const matches: Array<{
     index: number;
@@ -64,7 +65,7 @@ function tryPlanExactEdits(content: string, input: EditToolInput): ExactEditPlan
   for (const edit of input.edits) {
     const oldText = normalizeToLf(edit.oldText);
     const newText = normalizeToLf(edit.newText);
-    if (oldText.length === 0 || normalizeForFuzzyMatch(oldText) !== oldText) return undefined;
+    if (oldText.length === 0 || !isFuzzyNormalizationNeutral(oldText)) return undefined;
 
     const index = content.indexOf(oldText);
     if (index === -1 || content.indexOf(oldText, index + 1) !== -1) return undefined;
@@ -94,15 +95,25 @@ function tryPlanExactEdits(content: string, input: EditToolInput): ExactEditPlan
     }
     current.lastLine = currentLine;
   }
-
-  let result = content;
-  for (let index = matches.length - 1; index >= 0; index--) {
-    const match = matches[index]!;
-    result = result.slice(0, match.index) + match.replacement + result.slice(match.index + match.length);
+  let remainingNewline = content.indexOf("\n", lineScanOffset);
+  while (remainingNewline !== -1) {
+    currentLine++;
+    lineScanOffset = remainingNewline + 1;
+    remainingNewline = content.indexOf("\n", lineScanOffset);
   }
+
+  const parts: string[] = [];
+  let contentOffset = 0;
+  for (const match of matches) {
+    parts.push(content.slice(contentOffset, match.index), match.replacement);
+    contentOffset = match.index + match.length;
+  }
+  parts.push(content.slice(contentOffset));
+  const result = parts.join("");
   if (result === content) return undefined;
   return {
     newContent: result,
+    oldLineCount: currentLine + 1,
     replacements: matches.map((match) => ({
       matchIndex: match.index,
       matchLength: match.length,
@@ -131,7 +142,13 @@ export async function tryBuildExactPreview(
     const normalizedContent = normalizeToLf(content);
     const plan = tryPlanExactEdits(normalizedContent, input);
     if (!plan) return undefined;
-    return buildSparseDiffs(input.path, normalizedContent, plan.newContent, plan.replacements);
+    return buildSparseDiffs(
+      input.path,
+      normalizedContent,
+      plan.newContent,
+      plan.replacements,
+      plan.oldLineCount,
+    );
   } catch {
     return undefined;
   }
@@ -163,7 +180,13 @@ export async function tryExecuteExactEdit(
     const plan = tryPlanExactEdits(normalizedContent, input);
     if (plan === undefined) return undefined;
 
-    const sparseDiffs = buildSparseDiffs(input.path, normalizedContent, plan.newContent, plan.replacements);
+    const sparseDiffs = buildSparseDiffs(
+      input.path,
+      normalizedContent,
+      plan.newContent,
+      plan.replacements,
+      plan.oldLineCount,
+    );
     if (signal?.aborted) throw new Error("Operation aborted");
     await writeFile(absolutePath, bom + restoreLineEndings(plan.newContent, lineEnding), "utf8");
     if (signal?.aborted) throw new Error("Operation aborted");

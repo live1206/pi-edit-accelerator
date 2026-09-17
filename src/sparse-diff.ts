@@ -20,12 +20,22 @@ interface ReplacementGroup {
   replacements: SparseReplacement[];
 }
 
-function buildLineStarts(content: string): number[] {
-  const starts = [0];
-  for (let index = 0; index < content.length; index++) {
-    if (content.charCodeAt(index) === 10) starts.push(index + 1);
+function findSegmentStart(content: string, matchIndex: number, contextLines: number): number {
+  let start = content.lastIndexOf("\n", matchIndex - 1) + 1;
+  for (let count = 0; count < contextLines && start > 0; count++) {
+    start = content.lastIndexOf("\n", start - 2) + 1;
   }
-  return starts;
+  return start;
+}
+
+function findSegmentEnd(content: string, matchEnd: number, contextLines: number): number {
+  let newline = content.indexOf("\n", matchEnd);
+  let end = newline === -1 ? content.length : newline + 1;
+  for (let count = 0; count < contextLines && end < content.length; count++) {
+    newline = content.indexOf("\n", end);
+    end = newline === -1 ? content.length : newline + 1;
+  }
+  return end;
 }
 
 function groupReplacements(replacements: readonly SparseReplacement[], contextLines: number): ReplacementGroup[] {
@@ -109,20 +119,23 @@ export function buildSparseDiffs(
   oldContent: string,
   newContent: string,
   replacements: readonly SparseReplacement[],
+  oldLineCount: number,
   contextLines = 4,
 ): SparseDiffResult {
-  const oldLineStarts = buildLineStarts(oldContent);
-  const oldLines = oldContent.split("\n");
-  const newLines = newContent.split("\n");
   const groups = groupReplacements(replacements, contextLines);
   const hunks: Diff.StructuredPatchHunk[] = [];
   let cumulativeLineDelta = 0;
 
   for (const group of groups) {
     const segmentStartLine = Math.max(0, group.firstLine - contextLines);
-    const segmentEndLine = Math.min(oldLineStarts.length, group.lastLine + contextLines + 1);
-    const segmentStartOffset = oldLineStarts[segmentStartLine]!;
-    const segmentEndOffset = oldLineStarts[segmentEndLine] ?? oldContent.length;
+    const firstReplacement = group.replacements[0]!;
+    const lastReplacement = group.replacements[group.replacements.length - 1]!;
+    const segmentStartOffset = findSegmentStart(oldContent, firstReplacement.matchIndex, contextLines);
+    const segmentEndOffset = findSegmentEnd(
+      oldContent,
+      lastReplacement.matchIndex + lastReplacement.matchLength,
+      contextLines,
+    );
     const oldSegment = oldContent.slice(segmentStartOffset, segmentEndOffset);
     const newSegment = applyReplacements(oldSegment, group.replacements, segmentStartOffset);
     const local = Diff.structuredPatch(path, path, oldSegment, newSegment, undefined, undefined, {
@@ -145,7 +158,8 @@ export function buildSparseDiffs(
     { oldFileName: path, newFileName: path, oldHeader: undefined, newHeader: undefined, hunks },
     Diff.FILE_HEADERS_ONLY,
   );
-  const displayedOldLineCount = oldContent.endsWith("\n") ? oldLines.length - 1 : oldLines.length;
-  const display = buildDisplayDiff(hunks, displayedOldLineCount, Math.max(oldLines.length, newLines.length));
+  const newLineCount = oldLineCount + cumulativeLineDelta;
+  const displayedOldLineCount = oldContent.endsWith("\n") ? oldLineCount - 1 : oldLineCount;
+  const display = buildDisplayDiff(hunks, displayedOldLineCount, Math.max(oldLineCount, newLineCount));
   return { diff: display.diff, patch, firstChangedLine: display.firstChangedLine };
 }
