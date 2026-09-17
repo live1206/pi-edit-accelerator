@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.1.2 - 2026-09-17
 
 - Reuse matching in-flight preview plans during execution after exact file-content validation.
 - Report aggregate preview-plan reuse counts in accelerator statistics.

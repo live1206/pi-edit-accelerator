@@ -127,10 +127,10 @@ Twenty alternating measured runs after three warmups from commit `b8fe59b`:
 
 | Implementation | Median | p95 | Mean |
 |---|---:|---:|---:|
-| Built-in A | 418.90 ms | 465.41 ms | 421.77 ms |
-| Sparse extension C | 46.08 ms | 56.21 ms | 48.35 ms |
+| Built-in A | 423.37 ms | 502.22 ms | 432.14 ms |
+| Sparse extension C | 37.86 ms | 50.62 ms | 41.17 ms |
 
-Version 0.1.1 reduced median execution latency by approximately 89% on this stress fixture.
+Version 0.1.2 reduced median execution latency by approximately 91% on this stress fixture.
 
 ### Interactive preview benchmark
 
@@ -138,8 +138,8 @@ Ten alternating runs:
 
 | Preview | Median |
 |---|---:|
-| Built-in | 288.21 ms |
-| Sparse extension | 43.82 ms |
+| Built-in | 287.98 ms |
+| Sparse extension | 22.35 ms |
 
 The preview result is exploratory but confirms that sparse preview removes most of the separate interactive diff cost.
 
@@ -150,9 +150,9 @@ Ten alternating 5 MB runs start preview and execution in the same order as Pi's 
 | Extension version | Median preview-to-write latency |
 |---|---:|
 | `v0.1.1` | 77.40 ms |
-| Preview-plan reuse candidate | 48.79 ms |
+| `v0.1.2` | 51.16 ms |
 
-The candidate reduced median interactive latency by approximately 37%. Normalizing each extension result against the built-in measurement from the same run gives an approximately 35% relative improvement, reducing the effect of machine-load variation between benchmark runs.
+Version 0.1.2 reduced median interactive latency by approximately 34%. Normalizing each extension result against the built-in measurement from the same run gives an approximately 36% relative improvement, reducing the effect of machine-load variation between benchmark runs.
 
 These stress results demonstrate scaling potential. They do not establish normal-session impact; that depends on real file sizes and fast-path frequency.
 
