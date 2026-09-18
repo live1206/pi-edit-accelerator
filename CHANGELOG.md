@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.1.5 - 2026-09-18
 
 - Match Pi path normalization by delegating Unicode-space paths.
 - Preserve built-in byte behavior when replacement ranges split UTF-16 surrogate pairs.

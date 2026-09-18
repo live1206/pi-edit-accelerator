@@ -135,10 +135,10 @@ Twenty alternating measured runs after three warmups from commit `b8fe59b`:
 
 | Implementation | Median | p95 | Mean |
 |---|---:|---:|---:|
-| Built-in A | 410.44 ms | 501.56 ms | 426.51 ms |
-| Sparse extension C | 34.45 ms | 40.75 ms | 36.60 ms |
+| Built-in A | 401.11 ms | 495.65 ms | 412.68 ms |
+| Sparse extension C | 33.56 ms | 39.27 ms | 35.23 ms |
 
-Version 0.1.4 reduced median execution latency by approximately 92% on this stress fixture.
+Version 0.1.5 reduced median execution latency by approximately 92% on this stress fixture.
 
 ### Interactive preview benchmark
 
@@ -146,8 +146,8 @@ Ten alternating runs:
 
 | Preview | Median |
 |---|---:|
-| Built-in | 287.59 ms |
-| Sparse extension | 16.64 ms |
+| Built-in | 299.08 ms |
+| Sparse extension | 15.69 ms |
 
 The preview result is exploratory but confirms that sparse preview removes most of the separate interactive diff cost.
 

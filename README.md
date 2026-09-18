@@ -21,17 +21,17 @@ Clean benchmark on Node 22.23.2, Pi 0.85.1, Linux/WSL2, AMD EPYC 7763, using a 5
 
 | Execution | Median | p95 |
 |---|---:|---:|
-| Pi built-in edit | 410.44 ms | 501.56 ms |
-| Sparse extension | 34.45 ms | 40.75 ms |
+| Pi built-in edit | 401.11 ms | 495.65 ms |
+| Sparse extension | 33.56 ms | 39.27 ms |
 
-Version 0.1.4 reduced median execution latency by approximately 92% on this stress fixture.
+Version 0.1.5 reduced median execution latency by approximately 92% on this stress fixture.
 
 An exploratory interactive-preview benchmark measured:
 
 | Preview | Median |
 |---|---:|
-| Pi built-in preview | 287.59 ms |
-| Sparse extension preview | 16.64 ms |
+| Pi built-in preview | 299.08 ms |
+| Sparse extension preview | 15.69 ms |
 
 Version 0.1.4 measured 31.42 ms preview-to-write latency for length-changing replacements and 16.62 ms for equal-byte-length positional replacements.
 
@@ -42,13 +42,13 @@ These results demonstrate large-file scaling potential, not guaranteed gains for
 Install from the public GitHub repository:
 
 ```sh
-pi install git:github.com/live1206/pi-edit-accelerator@v0.1.4
+pi install git:github.com/live1206/pi-edit-accelerator@v0.1.5
 ```
 
 Try it for one run without changing settings:
 
 ```sh
-pi -e git:github.com/live1206/pi-edit-accelerator@v0.1.4
+pi -e git:github.com/live1206/pi-edit-accelerator@v0.1.5
 ```
 
 Restart Pi or run `/reload` after installation.
@@ -56,7 +56,7 @@ Restart Pi or run `/reload` after installation.
 Remove it with:
 
 ```sh
-pi remove git:github.com/live1206/pi-edit-accelerator@v0.1.4
+pi remove git:github.com/live1206/pi-edit-accelerator@v0.1.5
 ```
 
 Pi packages execute with full system access. Review the source before installation.
