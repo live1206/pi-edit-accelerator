@@ -8,6 +8,7 @@ import {
   type ExtensionAPI,
   type ExtensionContext,
 } from "@earendil-works/pi-coding-agent";
+import { applyPatch } from "diff";
 import { afterEach, describe, expect, it } from "vitest";
 import editAccelerator from "../extensions/edit-accelerator.ts";
 
@@ -115,6 +116,209 @@ describe("edit accelerator extension", () => {
 
     expect(result.details?.diff).toContain("+1 after!");
     expect(await readFile(join(directory, "fixture.txt"), "utf8")).toBe("after!\nmiddle\n");
+  });
+
+  it("delegates Unicode-space paths to Pi normalization", async () => {
+    initTheme("dark");
+    for (const prepared of [false, true]) {
+      const directory = await createDirectory();
+      await writeFile(join(directory, "a\u00a0b.txt"), "before\n", "utf8");
+      await writeFile(join(directory, "a b.txt"), "before\n", "utf8");
+      const input: EditToolInput = {
+        path: "a\u00a0b.txt",
+        edits: [{ oldText: "before", newText: "after" }],
+      };
+      const tool = loadExtensionTool();
+      if (prepared) {
+        const preview = renderPreview(tool, directory, input, true);
+        await Promise.all([execute(tool, directory, input), preview.done]);
+      } else await execute(tool, directory, input);
+
+      expect(await readFile(join(directory, "a\u00a0b.txt"), "utf8")).toBe("before\n");
+      expect(await readFile(join(directory, "a b.txt"), "utf8")).toBe("after\n");
+    }
+  });
+
+  it("preserves Pi's no-change error and original bytes", async () => {
+    initTheme("dark");
+    for (const content of ["ab\r\nend\n", "ab"]) {
+      for (const prepared of [false, true]) {
+        const directory = await createDirectory();
+        const path = join(directory, "fixture.txt");
+        await writeFile(path, content, "utf8");
+        const input: EditToolInput = {
+          path: "fixture.txt",
+          edits: [
+            { oldText: "a", newText: "ab" },
+            { oldText: "b", newText: "" },
+          ],
+        };
+        const tool = loadExtensionTool();
+        if (prepared) {
+          const preview = renderPreview(tool, directory, input, true);
+          await expect(Promise.all([execute(tool, directory, input), preview.done])).rejects.toThrow(
+            "No changes made to fixture.txt",
+          );
+        } else {
+          await expect(execute(tool, directory, input)).rejects.toThrow("No changes made to fixture.txt");
+        }
+        expect(await readFile(path, "utf8")).toBe(content);
+      }
+    }
+  });
+
+  it("matches built-in alignment after merging separated repeated-line groups", async () => {
+    initTheme("dark");
+    for (const prepared of [false, true]) {
+      const extensionDirectory = await createDirectory();
+      const builtInDirectory = await createDirectory();
+      const content = "head\n\n{\n{\n{\n\n}\na\n}\n\n{\n{\n{\n\n}\n\n\n\n\nb\n";
+      await writeFile(join(extensionDirectory, "fixture.txt"), content, "utf8");
+      await writeFile(join(builtInDirectory, "fixture.txt"), content, "utf8");
+      const input: EditToolInput = {
+        path: "fixture.txt",
+        edits: [
+          { oldText: "\n{\n{\n{\n\n}\na\n}", newText: "" },
+          { oldText: "b", newText: "\n\n" },
+        ],
+      };
+      const extensionTool = loadExtensionTool();
+      let extensionResult;
+      if (prepared) {
+        const preview = renderPreview(extensionTool, extensionDirectory, input, true);
+        [extensionResult] = await Promise.all([
+          execute(extensionTool, extensionDirectory, input),
+          preview.done,
+        ]);
+      } else extensionResult = await execute(extensionTool, extensionDirectory, input);
+      const builtInResult = await execute(createEditToolDefinition(builtInDirectory), builtInDirectory, input);
+
+      expect(extensionResult).toEqual(builtInResult);
+      const extensionBytes = await readFile(join(extensionDirectory, "fixture.txt"));
+      expect(extensionBytes).toEqual(await readFile(join(builtInDirectory, "fixture.txt")));
+      expect(applyPatch(content, extensionResult.details!.patch)).toBe(extensionBytes.toString("utf8"));
+    }
+  });
+
+  it("matches built-in alignment for wider structural groups", async () => {
+    initTheme("dark");
+    const widen = (text: string): string => text.replace(/\n/g, "\n".repeat(4));
+    for (const prepared of [false, true]) {
+      const extensionDirectory = await createDirectory();
+      const builtInDirectory = await createDirectory();
+      const content = widen("head\n\n{\n{\n{\n\n}\na\n}\n\n{\n{\n{\n\n}\n\n\n\n\nb\n");
+      await writeFile(join(extensionDirectory, "fixture.txt"), content, "utf8");
+      await writeFile(join(builtInDirectory, "fixture.txt"), content, "utf8");
+      const input: EditToolInput = {
+        path: "fixture.txt",
+        edits: [
+          { oldText: widen("\n{\n{\n{\n\n}\na\n}"), newText: "" },
+          { oldText: "b", newText: widen("\n\n") },
+        ],
+      };
+      const extensionTool = loadExtensionTool();
+      let extensionResult;
+      if (prepared) {
+        const preview = renderPreview(extensionTool, extensionDirectory, input, true);
+        [extensionResult] = await Promise.all([
+          execute(extensionTool, extensionDirectory, input),
+          preview.done,
+        ]);
+      } else extensionResult = await execute(extensionTool, extensionDirectory, input);
+      const builtInResult = await execute(createEditToolDefinition(builtInDirectory), builtInDirectory, input);
+
+      expect(extensionResult).toEqual(builtInResult);
+      const extensionBytes = await readFile(join(extensionDirectory, "fixture.txt"));
+      expect(extensionBytes).toEqual(await readFile(join(builtInDirectory, "fixture.txt")));
+      expect(applyPatch(content, extensionResult.details!.patch)).toBe(extensionBytes.toString("utf8"));
+    }
+  });
+
+  it("delegates interacting expanded groups to built-in details", async () => {
+    initTheme("dark");
+    for (const prepared of [false, true]) {
+      const extensionDirectory = await createDirectory();
+      const builtInDirectory = await createDirectory();
+      const content = `head\na\nx\n${"a\n".repeat(12)}tail\n`;
+      await writeFile(join(extensionDirectory, "fixture.txt"), content, "utf8");
+      await writeFile(join(builtInDirectory, "fixture.txt"), content, "utf8");
+      const input: EditToolInput = {
+        path: "fixture.txt",
+        edits: [
+          { oldText: "a\nx\n", newText: "" },
+          { oldText: "tail", newText: "TAIL" },
+        ],
+      };
+      const extensionTool = loadExtensionTool();
+      let extensionResult;
+      if (prepared) {
+        const preview = renderPreview(extensionTool, extensionDirectory, input, true);
+        [extensionResult] = await Promise.all([
+          execute(extensionTool, extensionDirectory, input),
+          preview.done,
+        ]);
+      } else extensionResult = await execute(extensionTool, extensionDirectory, input);
+      const builtInResult = await execute(createEditToolDefinition(builtInDirectory), builtInDirectory, input);
+
+      expect(extensionResult).toEqual(builtInResult);
+      const extensionBytes = await readFile(join(extensionDirectory, "fixture.txt"));
+      expect(extensionBytes).toEqual(await readFile(join(builtInDirectory, "fixture.txt")));
+      expect(applyPatch(content, extensionResult.details!.patch)).toBe(extensionBytes.toString("utf8"));
+    }
+  });
+
+  it("matches built-in bytes when replacement text splits a surrogate pair", async () => {
+    initTheme("dark");
+    for (const newText of ["XYZ", "X"]) {
+      const extensionDirectory = await createDirectory();
+      const builtInDirectory = await createDirectory();
+      await writeFile(join(extensionDirectory, "fixture.txt"), "😀 �\n", "utf8");
+      await writeFile(join(builtInDirectory, "fixture.txt"), "😀 �\n", "utf8");
+      const input: EditToolInput = {
+        path: "fixture.txt",
+        edits: [{ oldText: "\ud83d", newText }],
+      };
+      const extensionTool = loadExtensionTool();
+      const preview = renderPreview(extensionTool, extensionDirectory, input, true);
+      const [extensionResult] = await Promise.all([
+        execute(extensionTool, extensionDirectory, input),
+        preview.done,
+      ]);
+      const builtInResult = await execute(createEditToolDefinition(builtInDirectory), builtInDirectory, input);
+
+      expect(extensionResult).toEqual(builtInResult);
+      expect(await readFile(join(extensionDirectory, "fixture.txt"))).toEqual(
+        await readFile(join(builtInDirectory, "fixture.txt")),
+      );
+    }
+  });
+
+  it.each([
+    { content: "\nabc\ndef\n", oldText: "\nabc", newText: "X" },
+    { content: "\na\nb\nc\nd\ne\nf\n", oldText: "b", newText: "B" },
+    { content: `head\na\nx\n${"a\n".repeat(8)}tail\n`, oldText: "a\nx\n", newText: "" },
+  ])("matches built-in details for sparse boundary fixture %#", async ({ content, oldText, newText }) => {
+    initTheme("dark");
+    const extensionDirectory = await createDirectory();
+    const builtInDirectory = await createDirectory();
+    await writeFile(join(extensionDirectory, "fixture.txt"), content, "utf8");
+    await writeFile(join(builtInDirectory, "fixture.txt"), content, "utf8");
+    const input: EditToolInput = {
+      path: "fixture.txt",
+      edits: [{ oldText, newText }],
+    };
+    const extensionTool = loadExtensionTool();
+    const preview = renderPreview(extensionTool, extensionDirectory, input, true);
+    const [extensionResult] = await Promise.all([
+      execute(extensionTool, extensionDirectory, input),
+      preview.done,
+    ]);
+    const builtInResult = await execute(createEditToolDefinition(builtInDirectory), builtInDirectory, input);
+
+    expect(extensionResult).toEqual(builtInResult);
+    expect(await readFile(join(extensionDirectory, "fixture.txt"))).toEqual(
+      await readFile(join(builtInDirectory, "fixture.txt")),
+    );
   });
 
   it("registers one edit override with the built-in contract", () => {

@@ -35,6 +35,7 @@
     "bench:positional-write": "tsx benchmark/positional-write.ts",
     "bench:prefetch": "tsx benchmark/prefetch.ts",
     "bench:suffix-write": "tsx benchmark/suffix-write.ts",
+    "bench:group-scaling": "tsx benchmark/group-scaling.ts",
     "profile": "tsx benchmark/profile-candidate.ts",
     "profile:analyze": "tsx benchmark/analyze-profile.ts",
     "check": "tsc --noEmit",

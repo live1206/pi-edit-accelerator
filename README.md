@@ -81,7 +81,7 @@ All edits are matched against the original content. The extension preserves Pi-c
 
 ## Built-in fallback
 
-The extension delegates to Pi's captured built-in implementation when it cannot prove fast-path compatibility. This includes fuzzy normalization, duplicate or overlapping matches, special path forms, malformed input, and inaccessible files.
+The extension delegates to Pi's captured built-in implementation when it cannot prove fast-path compatibility. This includes fuzzy normalization, duplicate or overlapping matches, unresolved repeated-line diff interactions, Unicode-space and other special path forms, canceling replacement sets, malformed input, and inaccessible files.
 
 Pi exposes only one `edit` tool. Fallback calls the retained built-in tool object directly; it does not expose a second tool or perform another registry lookup.
 
@@ -129,6 +129,7 @@ npm run bench:interactive
 npm run bench:positional-write
 npm run bench:prefetch
 npm run bench:suffix-write
+npm run bench:group-scaling
 npm run profile -- --mode execution --output .artifacts/execution.cpuprofile --report .artifacts/execution-profile.json
 npm run profile:analyze -- .artifacts/execution.cpuprofile --output .artifacts/execution-analysis.json
 ```

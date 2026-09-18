@@ -21,8 +21,10 @@ interface ReplacementGroup {
 }
 
 function findSegmentStart(content: string, matchIndex: number, contextLines: number): number {
+  if (matchIndex === 0) return 0;
   let start = content.lastIndexOf("\n", matchIndex - 1) + 1;
   for (let count = 0; count < contextLines && start > 0; count++) {
+    if (start === 1) return 0;
     start = content.lastIndexOf("\n", start - 2) + 1;
   }
   return start;
@@ -75,6 +77,121 @@ function countNewlines(text: string): number {
   return count;
 }
 
+function needsExpandedContext(
+  hunks: readonly Diff.StructuredPatchHunk[],
+  contextLines: number,
+  hasEarlierContent: boolean,
+  hasLaterContent: boolean,
+): boolean {
+  if (hunks.length === 0) return false;
+  const firstLines = hunks[0]!.lines.filter((line) => line !== "\\ No newline at end of file");
+  const lastLines = hunks[hunks.length - 1]!.lines.filter((line) => line !== "\\ No newline at end of file");
+  const firstChange = firstLines.findIndex((line) => line[0] === "+" || line[0] === "-");
+  let lastChange = -1;
+  for (let index = lastLines.length - 1; index >= 0; index--) {
+    if (lastLines[index]![0] === "+" || lastLines[index]![0] === "-") {
+      lastChange = index;
+      break;
+    }
+  }
+  return (
+    (hasEarlierContent && firstChange < contextLines) ||
+    (hasLaterContent && lastLines.length - lastChange - 1 < contextLines)
+  );
+}
+
+function buildGroupHunks(
+  path: string,
+  oldContent: string,
+  group: ReplacementGroup,
+  contextLines: number,
+): Diff.StructuredPatchHunk[] {
+  const firstReplacement = group.replacements[0]!;
+  const lastReplacement = group.replacements[group.replacements.length - 1]!;
+  let windowContext = contextLines;
+  while (true) {
+    const segmentStartLine = Math.max(0, group.firstLine - windowContext);
+    const segmentStartOffset = findSegmentStart(oldContent, firstReplacement.matchIndex, windowContext);
+    const segmentEndOffset = findSegmentEnd(
+      oldContent,
+      lastReplacement.matchIndex + lastReplacement.matchLength,
+      windowContext,
+    );
+    const oldSegment = oldContent.slice(segmentStartOffset, segmentEndOffset);
+    const newSegment = applyReplacements(oldSegment, group.replacements, segmentStartOffset);
+    const local = Diff.structuredPatch(path, path, oldSegment, newSegment, undefined, undefined, {
+      context: contextLines,
+    });
+    if (
+      !needsExpandedContext(
+        local.hunks,
+        contextLines,
+        segmentStartOffset > 0,
+        segmentEndOffset < oldContent.length,
+      )
+    ) {
+      return local.hunks.map((hunk) => ({
+        ...hunk,
+        oldStart: hunk.oldStart + segmentStartLine,
+        newStart: hunk.newStart + segmentStartLine,
+      }));
+    }
+    windowContext *= 2;
+  }
+}
+
+function combineGroups(left: ReplacementGroup, right: ReplacementGroup): ReplacementGroup {
+  return {
+    firstLine: left.firstLine,
+    lastLine: right.lastLine,
+    replacements: [...left.replacements, ...right.replacements],
+  };
+}
+
+function prepareGroupHunks(
+  path: string,
+  oldContent: string,
+  groups: readonly ReplacementGroup[],
+  contextLines: number,
+): Array<{ group: ReplacementGroup; hunks: Diff.StructuredPatchHunk[] }> | undefined {
+  const initial = groups.map((group) => ({
+    group,
+    hunks: buildGroupHunks(path, oldContent, group, contextLines),
+  }));
+
+  for (let index = 1; index < initial.length; index++) {
+    const previousHunks = initial[index - 1]!.hunks;
+    const currentHunks = initial[index]!.hunks;
+    const previousHunk = previousHunks[previousHunks.length - 1];
+    const currentHunk = currentHunks[0];
+    if (
+      previousHunk &&
+      currentHunk &&
+      currentHunk.oldStart <= previousHunk.oldStart + previousHunk.oldLines
+    ) {
+      return undefined;
+    }
+  }
+
+  const hasStructuralReplacement = groups.some((group) =>
+    group.replacements.some((replacement) => {
+      const oldText = oldContent.slice(
+        replacement.matchIndex,
+        replacement.matchIndex + replacement.matchLength,
+      );
+      return oldText.includes("\n") || replacement.newText.includes("\n");
+    }),
+  );
+  if (groups.length > 1 && hasStructuralReplacement) {
+    const combined = groups.slice(1).reduce(
+      (group, current) => combineGroups(group, current),
+      groups[0]!,
+    );
+    return [{ group: combined, hunks: buildGroupHunks(path, oldContent, combined, contextLines) }];
+  }
+  return initial;
+}
+
 function buildDisplayDiff(
   hunks: readonly Diff.StructuredPatchHunk[],
   oldLineCount: number,
@@ -120,33 +237,32 @@ export function buildSparseDiffs(
   replacements: readonly SparseReplacement[],
   oldLineCount: number,
   contextLines = 4,
-): SparseDiffResult {
-  const groups = groupReplacements(replacements, contextLines);
+): SparseDiffResult | undefined {
+  const groups = prepareGroupHunks(
+    path,
+    oldContent,
+    groupReplacements(replacements, contextLines),
+    contextLines,
+  );
+  if (!groups) return undefined;
   const hunks: Diff.StructuredPatchHunk[] = [];
   let cumulativeLineDelta = 0;
 
-  for (const group of groups) {
-    const segmentStartLine = Math.max(0, group.firstLine - contextLines);
-    const firstReplacement = group.replacements[0]!;
-    const lastReplacement = group.replacements[group.replacements.length - 1]!;
-    const segmentStartOffset = findSegmentStart(oldContent, firstReplacement.matchIndex, contextLines);
-    const segmentEndOffset = findSegmentEnd(
-      oldContent,
-      lastReplacement.matchIndex + lastReplacement.matchLength,
-      contextLines,
-    );
-    const oldSegment = oldContent.slice(segmentStartOffset, segmentEndOffset);
-    const newSegment = applyReplacements(oldSegment, group.replacements, segmentStartOffset);
-    const local = Diff.structuredPatch(path, path, oldSegment, newSegment, undefined, undefined, {
-      context: contextLines,
-    });
-    for (const hunk of local.hunks) {
-      hunks.push({
-        ...hunk,
-        oldStart: hunk.oldStart + segmentStartLine,
-        newStart: hunk.newStart + segmentStartLine + cumulativeLineDelta,
-      });
+  for (const { group, hunks: groupHunks } of groups) {
+    const adjustedHunks = groupHunks.map((hunk) => ({
+      ...hunk,
+      newStart: hunk.newStart + cumulativeLineDelta,
+    }));
+    const previousHunk = hunks[hunks.length - 1];
+    const firstAdjustedHunk = adjustedHunks[0];
+    if (
+      previousHunk &&
+      firstAdjustedHunk &&
+      firstAdjustedHunk.oldStart <= previousHunk.oldStart + previousHunk.oldLines
+    ) {
+      return undefined;
     }
+    hunks.push(...adjustedHunks);
     for (const replacement of group.replacements) {
       const oldText = oldContent.slice(replacement.matchIndex, replacement.matchIndex + replacement.matchLength);
       cumulativeLineDelta += countNewlines(replacement.newText) - countNewlines(oldText);

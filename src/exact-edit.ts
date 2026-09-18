@@ -41,8 +41,10 @@ function isFuzzyNormalizationNeutral(text: string): boolean {
   return text.normalize("NFKC") === text;
 }
 
+const normalizedPathSpacePattern = /[\u00A0\u2000-\u200A\u202F\u205F\u3000]/u;
+
 function resolveOrdinaryPath(path: string, cwd: string): string | undefined {
-  if (path.startsWith("~") || path.startsWith("@") || path.includes("\u202f")) return undefined;
+  if (path.startsWith("~") || path.startsWith("@") || normalizedPathSpacePattern.test(path)) return undefined;
   return isAbsolute(path) ? resolve(path) : resolve(cwd, path);
 }
 
@@ -100,6 +102,35 @@ function isAsciiWhitespaceExceptLf(code: number): boolean {
   return code === 9 || code === 11 || code === 12 || code === 13 || code === 32;
 }
 
+function plannedEditsProduceChange(
+  content: string,
+  matches: readonly { index: number; length: number; replacement: string }[],
+): boolean {
+  let sourceOffset = 0;
+  let outputOffset = 0;
+  for (const match of matches) {
+    const unchangedLength = match.index - sourceOffset;
+    if (sourceOffset !== outputOffset) {
+      for (let index = 0; index < unchangedLength; index++) {
+        if (content.charCodeAt(sourceOffset + index) !== content.charCodeAt(outputOffset + index)) return true;
+      }
+    }
+    outputOffset += unchangedLength;
+    for (let index = 0; index < match.replacement.length; index++) {
+      if (match.replacement.charCodeAt(index) !== content.charCodeAt(outputOffset + index)) return true;
+    }
+    outputOffset += match.replacement.length;
+    sourceOffset = match.index + match.length;
+  }
+  const unchangedLength = content.length - sourceOffset;
+  if (sourceOffset !== outputOffset) {
+    for (let index = 0; index < unchangedLength; index++) {
+      if (content.charCodeAt(sourceOffset + index) !== content.charCodeAt(outputOffset + index)) return true;
+    }
+  }
+  return outputOffset + unchangedLength !== content.length;
+}
+
 function tryPlanExactEdits(
   content: string,
   input: EditToolInput,
@@ -115,7 +146,6 @@ function tryPlanExactEdits(
     firstLine?: number;
     lastLine?: number;
   }> = [];
-  let hasChange = false;
   for (const edit of input.edits) {
     const oldText = normalizeToLf(edit.oldText);
     const newText = normalizeToLf(edit.newText);
@@ -123,11 +153,12 @@ function tryPlanExactEdits(
 
     const index = content.indexOf(oldText);
     if (index === -1 || content.indexOf(oldText, index + 1) !== -1) return undefined;
-    if (oldText !== newText) hasChange = true;
     matches.push({ index, length: oldText.length, replacement: newText });
   }
 
   matches.sort((left, right) => left.index - right.index);
+  if (!plannedEditsProduceChange(content, matches)) return undefined;
+
   let currentLine = 0;
   let lineScanOffset = 0;
   for (let index = 0; index < matches.length; index++) {
@@ -167,7 +198,6 @@ function tryPlanExactEdits(
   ) {
     return undefined;
   }
-  if (!hasChange) return undefined;
   return {
     oldLineCount: currentLine + 1,
     replacements: matches.map((match) => ({
@@ -178,6 +208,17 @@ function tryPlanExactEdits(
       lastLine: match.lastLine!,
     })),
   };
+}
+
+function isWellFormedUtf16(text: string): boolean {
+  for (let index = 0; index < text.length; index++) {
+    const code = text.charCodeAt(index);
+    if (code >= 0xd800 && code <= 0xdbff) {
+      const next = text.charCodeAt(++index);
+      if (!(next >= 0xdc00 && next <= 0xdfff)) return false;
+    } else if (code >= 0xdc00 && code <= 0xdfff) return false;
+  }
+  return true;
 }
 
 function buildSparseWritePlan(
@@ -198,6 +239,7 @@ function buildSparseWritePlan(
       replacement.matchIndex,
       replacement.matchIndex + replacement.matchLength,
     );
+    if (!isWellFormedUtf16(oldText) || !isWellFormedUtf16(replacement.newText)) return {};
     const oldBytes = Buffer.from(oldText);
     const newBytes = Buffer.from(replacement.newText);
     const position = rawBytes.indexOf(oldBytes, searchOffset);
@@ -295,6 +337,7 @@ export async function tryPrepareExactEdit(
       plan.replacements,
       plan.oldLineCount,
     );
+    if (!details) return undefined;
     const sparseWritePlan = buildSparseWritePlan(
       rawBytes,
       content,
@@ -409,6 +452,7 @@ export async function tryExecuteExactEdit(
       plan.replacements,
       plan.oldLineCount,
     );
+    if (!sparseDiffs) return undefined;
     const newContent = applyPlannedEdits(normalizedContent, plan.replacements);
     if (signal?.aborted) throw new Error("Operation aborted");
     await writeFile(absolutePath, bom + restoreLineEndings(newContent, lineEnding), "utf8");

@@ -1,4 +1,5 @@
 import { generateDiffString, generateUnifiedPatch } from "@earendil-works/pi-coding-agent";
+import { applyPatch } from "diff";
 import { describe, expect, it } from "vitest";
 import { buildSparseDiffs, type SparseReplacement } from "../src/sparse-diff.ts";
 
@@ -33,10 +34,12 @@ function plan(oldContent: string, edits: readonly TextReplacement[]): { newConte
 function compare(oldContent: string, edits: readonly TextReplacement[], path = "fixture.txt"): void {
   const { newContent, replacements } = plan(oldContent, edits);
   const sparse = buildSparseDiffs(path, oldContent, replacements, oldContent.split("\n").length);
+  expect(sparse).toBeDefined();
   const builtIn = generateDiffString(oldContent, newContent);
-  expect(sparse.diff).toBe(builtIn.diff);
-  expect(sparse.firstChangedLine).toBe(builtIn.firstChangedLine);
-  expect(sparse.patch).toBe(generateUnifiedPatch(path, oldContent, newContent));
+  expect(sparse!.diff).toBe(builtIn.diff);
+  expect(sparse!.firstChangedLine).toBe(builtIn.firstChangedLine);
+  expect(sparse!.patch).toBe(generateUnifiedPatch(path, oldContent, newContent));
+  expect(applyPatch(oldContent, sparse!.patch)).toBe(newContent);
 }
 
 describe("sparse diff", () => {
@@ -96,5 +99,45 @@ describe("sparse diff", () => {
       { oldText: "before", newText: "BEFORE" },
       { oldText: "after", newText: "AFTER" },
     ]);
+  });
+
+  it("matches a replacement spanning the leading blank line", () => {
+    compare("\nabc\ndef\n", [{ oldText: "\nabc", newText: "X" }]);
+  });
+
+  it("counts context from a leading blank line", () => {
+    compare("\na\nb\nc\nd\ne\nf\n", [{ oldText: "b", newText: "B" }]);
+  });
+
+  it("matches whole-file alignment across repeated lines", () => {
+    const content = `head\na\nx\n${"a\n".repeat(8)}tail\n`;
+    compare(content, [{ oldText: "a\nx\n", newText: "" }]);
+  });
+
+  it("merges separated groups whose repeated-line alignment interacts", () => {
+    const content = "head\n\n{\n{\n{\n\n}\na\n}\n\n{\n{\n{\n\n}\n\n\n\n\nb\n";
+    compare(content, [
+      { oldText: "\n{\n{\n{\n\n}\na\n}", newText: "" },
+      { oldText: "b", newText: "\n\n" },
+    ]);
+  });
+
+  it("matches wider structural groups without a fixed merge cutoff", () => {
+    const widen = (text: string): string => text.replace(/\n/g, "\n".repeat(4));
+    const content = widen("head\n\n{\n{\n{\n\n}\na\n}\n\n{\n{\n{\n\n}\n\n\n\n\nb\n");
+    compare(content, [
+      { oldText: widen("\n{\n{\n{\n\n}\na\n}"), newText: "" },
+      { oldText: "b", newText: widen("\n\n") },
+    ]);
+  });
+
+  it("delegates when expanded replacement groups produce interacting hunks", () => {
+    const content = `head\na\nx\n${"a\n".repeat(12)}tail\n`;
+    const { replacements } = plan(content, [
+      { oldText: "a\nx\n", newText: "" },
+      { oldText: "tail", newText: "TAIL" },
+    ]);
+
+    expect(buildSparseDiffs("fixture.txt", content, replacements, content.split("\n").length)).toBeUndefined();
   });
 });

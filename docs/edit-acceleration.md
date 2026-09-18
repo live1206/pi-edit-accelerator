@@ -56,7 +56,8 @@ The extension delegates to Pi's captured built-in edit implementation when fast-
 - duplicate matches
 - overlapping edits
 - unsupported or malformed input
-- special path forms handled by Pi
+- special path forms handled by Pi, including Unicode spaces normalized by Pi
+- replacement sets whose combined output is unchanged
 - inaccessible files
 
 Fallback preserves Pi's current errors and behavior. The fast path does not mutate a file before deciding whether it is supported.
@@ -68,7 +69,7 @@ Pi's built-in path computes two general full-file diffs after applying replaceme
 - display-oriented diff
 - standard unified patch
 
-The extension already knows the exact replacement offsets. It groups affected line ranges, adds four lines of context, diffs only those local segments, adjusts later hunk coordinates for inserted or removed lines, and formats:
+The extension already knows the exact replacement offsets. It groups affected line ranges, adds four lines of context, expands ambiguous repeated-line boundaries until alignment stabilizes, and adjusts later hunk coordinates for inserted or removed lines. Multiple structural groups—those spanning or producing line boundaries—are recomputed together once without a distance cutoff. Line-local groups retain independent sparse hunks. If independently expanded groups overlap or become adjacent before shared recomputation, the extension delegates to Pi rather than concatenate an invalid patch. Otherwise it formats:
 
 - the display diff used by Pi's edit renderer
 - the complete unified patch
@@ -208,7 +209,14 @@ Current tests cover:
 - invalid UTF-8 fallback to built-in-compatible full-file writes
 - CRLF fallback to full-file writes
 - suffix expansion and truncation
+- malformed UTF-16 replacement fallback
 - stale prefetched-content invalidation and path mismatch
+- leading-blank-line diff boundaries
+- repeated-line whole-file alignment
+- shared recomputation for separated and wider structural repeated-line groups
+- interacting expanded-group fallback and patch applicability
+- 100/200-edit line-local group scaling
+- canceling replacement sets and no-change errors
 - abort before positional mutation
 - partial-line and multiline edits
 - insertion and deletion
@@ -253,6 +261,8 @@ Sparse hunk generation is no longer a meaningful hotspot. Remaining CPU is split
 A combined normalization-and-line-discovery scan was also tested. Its self time was 16.37 ms versus approximately 12.45 ms for the existing native-regex and `indexOf` path, and preview median rose to 31.01 ms. That experiment was rejected.
 
 A narrower ASCII experiment was retained. Native `isAscii` validation used 0.23 ms and allowed the 7.37 ms Unicode-normalization scan to be skipped; trailing whitespace is checked during existing line discovery. Against the immediately preceding revision, preview median decreased from 22.42 ms to 20.08 ms, approximately 10%.
+
+An initial transitive merge implementation repeatedly recomputed a growing prefix and regressed from 356 ms at 100 edits to 5,825 ms at 200 edits. The final two-phase policy builds each line-local group once and computes any shared structural group once. The same fixtures measured 11.67 ms and 33.41 ms, versus Pi's 101.50 ms and 366.12 ms.
 
 ## Rust decision gate
 

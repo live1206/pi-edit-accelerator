@@ -4,6 +4,7 @@ import { join } from "node:path";
 import type { EditToolInput, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { afterEach, describe, expect, it } from "vitest";
 import {
+  getExactEditPathKey,
   tryApplyExactEdits,
   tryExecuteExactEdit,
   tryPrefetchExactEditFile,
@@ -42,6 +43,38 @@ describe("exact edit fast path", () => {
         edits: [{ oldText: "same", newText: "changed" }],
       }),
     ).toBeUndefined();
+  });
+
+  it("delegates when disjoint replacements cancel each other", () => {
+    expect(
+      tryApplyExactEdits("ab", {
+        path: "fixture.txt",
+        edits: [
+          { oldText: "a", newText: "ab" },
+          { oldText: "b", newText: "" },
+        ],
+      }),
+    ).toBeUndefined();
+  });
+
+  it.each([
+    "\u00A0",
+    "\u2000",
+    "\u2001",
+    "\u2002",
+    "\u2003",
+    "\u2004",
+    "\u2005",
+    "\u2006",
+    "\u2007",
+    "\u2008",
+    "\u2009",
+    "\u200A",
+    "\u202F",
+    "\u205F",
+    "\u3000",
+  ])("delegates paths containing Pi-normalized Unicode space %#", (space) => {
+    expect(getExactEditPathKey(`a${space}b.txt`, "/tmp")).toBeUndefined();
   });
 
   it("retains the Unicode normalization check for non-ASCII files", async () => {
@@ -132,6 +165,43 @@ describe("exact edit fast path", () => {
 
     expect(result?.details).toBe(prepared?.result.details);
     expect(await readFile(join(directory, "fixture.txt"), "utf8")).toBe("after\nmiddle\n");
+  });
+
+  it.each([
+    { newText: "XYZ", expected: "XYZ� �\n" },
+    { newText: "X", expected: "X� �\n" },
+  ])("uses a full write when an edit splits a surrogate pair: $newText", async ({ newText, expected }) => {
+    const directory = await mkdtemp(join(tmpdir(), "pi-edit-accelerator-"));
+    tempDirectories.push(directory);
+    const path = join(directory, "fixture.txt");
+    await writeFile(path, "😀 �\n", "utf8");
+    const input: EditToolInput = {
+      path: "fixture.txt",
+      edits: [{ oldText: "\ud83d", newText }],
+    };
+    const prepared = await tryPrepareExactEdit(input, directory);
+
+    expect(prepared?.positionalWrites).toBeUndefined();
+    expect(prepared?.suffixWrite).toBeUndefined();
+    await tryExecuteExactEdit(input, undefined, { cwd: directory } as ExtensionContext, prepared);
+    expect(await readFile(path, "utf8")).toBe(expected);
+  });
+
+  it("uses a full write for malformed replacement text", async () => {
+    const directory = await mkdtemp(join(tmpdir(), "pi-edit-accelerator-"));
+    tempDirectories.push(directory);
+    const path = join(directory, "fixture.txt");
+    await writeFile(path, "before\n", "utf8");
+    const input: EditToolInput = {
+      path: "fixture.txt",
+      edits: [{ oldText: "before", newText: "\ud83d" }],
+    };
+    const prepared = await tryPrepareExactEdit(input, directory);
+
+    expect(prepared?.positionalWrites).toBeUndefined();
+    expect(prepared?.suffixWrite).toBeUndefined();
+    await tryExecuteExactEdit(input, undefined, { cwd: directory } as ExtensionContext, prepared);
+    expect(await readFile(path, "utf8")).toBe("�\n");
   });
 
   it("writes equal-byte-length replacements at their byte positions", async () => {

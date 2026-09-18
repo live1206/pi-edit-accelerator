@@ -1,5 +1,14 @@
 # Changelog
 
+## Unreleased
+
+- Match Pi path normalization by delegating Unicode-space paths.
+- Preserve built-in byte behavior when replacement ranges split UTF-16 surrogate pairs.
+- Correct sparse diff boundaries for leading blank lines and repeated-line alignment.
+- Recompute multiple structural groups once without arbitrary merge distances or repeated-prefix work.
+- Add 100/200-edit group-scaling benchmarks.
+- Delegate canceling replacement sets to preserve Pi's no-change error and original bytes.
+
 ## 0.1.4 - 2026-09-17
 
 - Prefetch file bytes while edit arguments are still streaming, with debounce and execution-time validation.
