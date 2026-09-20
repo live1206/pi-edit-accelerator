@@ -12,7 +12,9 @@ import {
 import {
   getNativePlannerStatus,
   resetNativePlannerForTests,
+  tryNativeAsciiExecutionPlan,
   tryNativeAsciiPlan,
+  tryNativeAsciiSuffix,
 } from "../src/native-planner.ts";
 
 const nativePath = resolve("native/pi-edit-accelerator-native.linux-x64-gnu.node");
@@ -109,6 +111,32 @@ describe.skipIf(!nativeAvailable)("native ASCII planner", () => {
     expect(getNativePlannerStatus()).toBe("uninitialized");
   });
 
+  it("assembles suffixes only for execution", () => {
+    process.env.PI_EDIT_ACCELERATOR_NATIVE_PATH = nativePath;
+    resetNativePlannerForTests();
+    const content = Buffer.from("first\nmiddle\nlast\n");
+    const input: EditToolInput = {
+      path: "fixture.txt",
+      edits: [{ oldText: "first", newText: "first expanded" }],
+    };
+    const preview = tryNativeAsciiPlan(content, input);
+    const execution = tryNativeAsciiExecutionPlan(content, input);
+
+    expect(preview.status).toBe("planned");
+    expect(execution.status).toBe("planned");
+    if (preview.status !== "planned" || execution.status !== "planned") return;
+    expect(preview.plan.suffixBytes).toBeUndefined();
+    expect(execution.plan.suffixBytes?.toString("utf8")).toBe("first expanded\nmiddle\nlast\n");
+    expect(
+      tryNativeAsciiSuffix(
+        content,
+        preview.plan.replacements,
+        preview.plan.suffixWrite!.contentOffset,
+        preview.plan.suffixWrite!.replacementIndex,
+      )?.toString("utf8"),
+    ).toBe("first expanded\nmiddle\nlast\n");
+  });
+
   it("keeps preview buffer-first and defers suffix materialization until execution", async () => {
     process.env.PI_EDIT_ACCELERATOR_NATIVE_PATH = nativePath;
     resetNativePlannerForTests();
@@ -134,6 +162,28 @@ describe.skipIf(!nativeAvailable)("native ASCII planner", () => {
     );
     expect(result).toEqual(prepared?.result);
     expect(await readFile(path, "utf8")).toBe("first expanded\nmiddle\nlast\n");
+  });
+
+  it("preserves a UTF-8 BOM during fresh native suffix execution", async () => {
+    process.env.PI_EDIT_ACCELERATOR_NATIVE_PATH = nativePath;
+    resetNativePlannerForTests();
+    const directory = await mkdtemp(join(tmpdir(), "pi-edit-native-bom-"));
+    tempDirectories.push(directory);
+    const path = join(directory, "fixture.txt");
+    await writeFile(path, "\uFEFFbefore\nafter\n", "utf8");
+    const input: EditToolInput = {
+      path: "fixture.txt",
+      edits: [{ oldText: "before", newText: "before expanded" }],
+    };
+
+    const result = await tryExecuteExactEdit(
+      input,
+      undefined,
+      { cwd: directory } as ExtensionContext,
+    );
+
+    expect(result).toBeDefined();
+    expect(await readFile(path, "utf8")).toBe("\uFEFFbefore expanded\nafter\n");
   });
 
   it("matches the TypeScript oracle across deterministic ASCII plans", () => {

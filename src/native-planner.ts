@@ -37,11 +37,19 @@ interface NativePlan {
   replacements: NativeReplacement[];
   positionalWrites?: NativePositionalWrite[];
   suffixWrite?: { position: number; replacementIndex: number };
+  suffixBytes?: Buffer;
   diffWindows?: NativeDiffWindow[];
 }
 
 interface NativeBinding {
   planAsciiEdits(content: Buffer, edits: NativeEdit[]): NativePlan | undefined;
+  prepareAsciiExecution(content: Buffer, edits: NativeEdit[]): NativePlan | undefined;
+  assembleAsciiSuffix(
+    content: Buffer,
+    replacements: NativeReplacement[],
+    position: number,
+    replacementIndex: number,
+  ): Buffer | undefined;
 }
 
 export interface NativeExactEditPlan {
@@ -50,6 +58,7 @@ export interface NativeExactEditPlan {
   replacements: SparseReplacement[];
   positionalWrites?: NativePositionalWrite[];
   suffixWrite?: { position: number; contentOffset: number; replacementIndex: number };
+  suffixBytes?: Buffer;
   diffWindows?: NativeDiffWindow[];
 }
 
@@ -95,7 +104,13 @@ function loadNativeBinding(): NativeBinding | undefined {
     resolve(dirname(fileURLToPath(import.meta.url)), "../native", fileName);
   try {
     const binding = require(path) as NativeBinding;
-    if (typeof binding?.planAsciiEdits !== "function") throw new Error("Native planner export is missing");
+    if (
+      typeof binding?.planAsciiEdits !== "function" ||
+      typeof binding.prepareAsciiExecution !== "function" ||
+      typeof binding.assembleAsciiSuffix !== "function"
+    ) {
+      throw new Error("Native planner exports are incomplete");
+    }
     loaderState = { status: "loaded", binding };
     return binding;
   } catch {
@@ -117,10 +132,37 @@ function normalizedAsciiEdits(input: EditToolInput): NativeEdit[] | undefined {
   return edits;
 }
 
-export function tryNativeAsciiPlan(
+function convertNativePlan(nativePlan: NativePlan, rawOffset: number): NativeExactEditPlan {
+  const replacements: SparseReplacement[] = nativePlan.replacements.map((replacement) => ({
+    matchIndex: replacement.byteOffset,
+    matchLength: replacement.oldByteLength,
+    newText: replacement.newText,
+    firstLine: replacement.firstLine,
+    lastLine: replacement.lastLine,
+  }));
+  return {
+    oldLineCount: nativePlan.oldLineCount,
+    oldEndsWithNewline: nativePlan.oldEndsWithNewline,
+    replacements,
+    positionalWrites: nativePlan.positionalWrites?.map((write) => ({
+      position: write.position + rawOffset,
+      bytes: write.bytes,
+    })),
+    suffixWrite: nativePlan.suffixWrite && {
+      position: nativePlan.suffixWrite.position + rawOffset,
+      contentOffset: nativePlan.suffixWrite.position,
+      replacementIndex: nativePlan.suffixWrite.replacementIndex,
+    },
+    suffixBytes: nativePlan.suffixBytes,
+    diffWindows: nativePlan.diffWindows,
+  };
+}
+
+function tryNativePlan(
   contentBytes: Buffer,
   input: EditToolInput,
-  rawOffset = 0,
+  rawOffset: number,
+  mode: "preview" | "execution",
 ): NativePlanningAttempt {
   if (contentBytes.length > 0xffff_ffff || !isAscii(contentBytes) || contentBytes.includes(13)) {
     return { status: "not-used" };
@@ -130,36 +172,66 @@ export function tryNativeAsciiPlan(
   const binding = loadNativeBinding();
   if (!binding) return { status: "not-used" };
   try {
-    const nativePlan = binding.planAsciiEdits(contentBytes, edits);
+    const nativePlan =
+      mode === "preview"
+        ? binding.planAsciiEdits(contentBytes, edits)
+        : binding.prepareAsciiExecution(contentBytes, edits);
     if (!nativePlan) return { status: "declined" };
-    const replacements: SparseReplacement[] = nativePlan.replacements.map((replacement) => ({
-      matchIndex: replacement.byteOffset,
-      matchLength: replacement.oldByteLength,
-      newText: replacement.newText,
-      firstLine: replacement.firstLine,
-      lastLine: replacement.lastLine,
-    }));
-    return {
-      status: "planned",
-      plan: {
-        oldLineCount: nativePlan.oldLineCount,
-        oldEndsWithNewline: nativePlan.oldEndsWithNewline,
-        replacements,
-        positionalWrites: nativePlan.positionalWrites?.map((write) => ({
-          position: write.position + rawOffset,
-          bytes: write.bytes,
-        })),
-        suffixWrite: nativePlan.suffixWrite && {
-          position: nativePlan.suffixWrite.position + rawOffset,
-          contentOffset: nativePlan.suffixWrite.position,
-          replacementIndex: nativePlan.suffixWrite.replacementIndex,
-        },
-        diffWindows: nativePlan.diffWindows,
-      },
-    };
+    if (
+      (mode === "preview" && nativePlan.suffixBytes !== undefined) ||
+      (mode === "execution" && nativePlan.suffixWrite !== undefined && nativePlan.suffixBytes === undefined)
+    ) {
+      throw new Error("Native planner returned an invalid suffix contract");
+    }
+    return { status: "planned", plan: convertNativePlan(nativePlan, rawOffset) };
   } catch {
     loaderState = { status: "disabled" };
     return { status: "not-used" };
+  }
+}
+
+export function tryNativeAsciiPlan(
+  contentBytes: Buffer,
+  input: EditToolInput,
+  rawOffset = 0,
+): NativePlanningAttempt {
+  return tryNativePlan(contentBytes, input, rawOffset, "preview");
+}
+
+export function tryNativeAsciiExecutionPlan(
+  contentBytes: Buffer,
+  input: EditToolInput,
+  rawOffset = 0,
+): NativePlanningAttempt {
+  return tryNativePlan(contentBytes, input, rawOffset, "execution");
+}
+
+export function tryNativeAsciiSuffix(
+  contentBytes: Buffer,
+  replacements: readonly SparseReplacement[],
+  position: number,
+  replacementIndex: number,
+): Buffer | undefined {
+  const binding = loadNativeBinding();
+  if (!binding) return undefined;
+  try {
+    const suffix = binding.assembleAsciiSuffix(
+      contentBytes,
+      replacements.map((replacement) => ({
+        byteOffset: replacement.matchIndex,
+        oldByteLength: replacement.matchLength,
+        newText: replacement.newText,
+        firstLine: replacement.firstLine,
+        lastLine: replacement.lastLine,
+      })),
+      position,
+      replacementIndex,
+    );
+    if (!suffix) loaderState = { status: "disabled" };
+    return suffix;
+  } catch {
+    loaderState = { status: "disabled" };
+    return undefined;
   }
 }
 

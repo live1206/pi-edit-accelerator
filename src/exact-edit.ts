@@ -9,7 +9,9 @@ import {
   withFileMutationQueue,
 } from "@earendil-works/pi-coding-agent";
 import {
+  tryNativeAsciiExecutionPlan,
   tryNativeAsciiPlan,
+  tryNativeAsciiSuffix,
   type NativeExactEditPlan,
   type NativePlanningAttempt,
 } from "./native-planner.ts";
@@ -347,6 +349,25 @@ function materializePreparedContent(prepared: PreparedExactEdit): string {
   return normalizeToLf(content);
 }
 
+function buildNativeSparseDetails(
+  path: string,
+  nativePlan: NativeExactEditPlan,
+): EditToolDetails | undefined {
+  if (!nativePlan.diffWindows) return undefined;
+  return buildSparseDiffsFromWindows(
+    path,
+    nativePlan.diffWindows.map((window) => ({
+      oldStartLine: window.oldStartLine,
+      oldContent: window.oldBytes.toString("utf8"),
+      newContent: window.newBytes.toString("utf8"),
+      hasEarlierContent: window.hasEarlierContent,
+      hasLaterContent: window.hasLaterContent,
+    })),
+    nativePlan.oldLineCount,
+    nativePlan.oldEndsWithNewline,
+  );
+}
+
 export async function tryPrepareExactEdit(
   input: EditToolInput,
   cwd: string,
@@ -365,19 +386,8 @@ export async function tryPrepareExactEdit(
     const bom = hasUtf8Bom(rawBytes) ? "\uFEFF" : "";
     const bomByteLength = Buffer.byteLength(bom);
     const nativeAttempt = tryNativeAsciiPlan(rawBytes.subarray(bomByteLength), input, bomByteLength);
-    if (nativeAttempt.status === "planned" && nativeAttempt.plan.diffWindows) {
-      const nativeDetails = buildSparseDiffsFromWindows(
-        input.path,
-        nativeAttempt.plan.diffWindows.map((window) => ({
-          oldStartLine: window.oldStartLine,
-          oldContent: window.oldBytes.toString("utf8"),
-          newContent: window.newBytes.toString("utf8"),
-          hasEarlierContent: window.hasEarlierContent,
-          hasLaterContent: window.hasLaterContent,
-        })),
-        nativeAttempt.plan.oldLineCount,
-        nativeAttempt.plan.oldEndsWithNewline,
-      );
+    if (nativeAttempt.status === "planned") {
+      const nativeDetails = buildNativeSparseDetails(input.path, nativeAttempt.plan);
       if (nativeDetails) {
         return {
           absolutePath,
@@ -495,13 +505,26 @@ export async function tryExecuteExactEdit(
           if (prepared.positionalWrites) await applyPositionalWrites(handle, prepared.positionalWrites);
           else {
             const suffixWrite = prepared.suffixWrite!;
-            const suffixContent = materializePreparedContent(prepared).slice(suffixWrite.contentOffset);
-            const suffix = applyPlannedEdits(
-              suffixContent,
-              prepared.replacements.slice(suffixWrite.replacementIndex),
-              suffixWrite.contentOffset,
-            );
-            const suffixBytes = Buffer.from(suffix);
+            const contentBytes = rawBytes.subarray(Buffer.byteLength(prepared.bom));
+            const nativeSuffix =
+              prepared.normalizedContent === undefined
+                ? tryNativeAsciiSuffix(
+                    contentBytes,
+                    prepared.replacements,
+                    suffixWrite.contentOffset,
+                    suffixWrite.replacementIndex,
+                  )
+                : undefined;
+            let suffixBytes = nativeSuffix;
+            if (!suffixBytes) {
+              const suffixContent = materializePreparedContent(prepared).slice(suffixWrite.contentOffset);
+              const suffix = applyPlannedEdits(
+                suffixContent,
+                prepared.replacements.slice(suffixWrite.replacementIndex),
+                suffixWrite.contentOffset,
+              );
+              suffixBytes = Buffer.from(suffix);
+            }
             await applyPositionalWrites(handle, [{ position: suffixWrite.position, bytes: suffixBytes }]);
             await handle.truncate(suffixWrite.position + suffixBytes.length);
           }
@@ -528,13 +551,59 @@ export async function tryExecuteExactEdit(
       }
     }
 
+    const bom = hasUtf8Bom(rawBytes) ? "\uFEFF" : "";
+    const bomByteLength = Buffer.byteLength(bom);
+    const nativeAttempt = tryNativeAsciiExecutionPlan(
+      rawBytes.subarray(bomByteLength),
+      input,
+      bomByteLength,
+    );
+    if (nativeAttempt.status === "planned") {
+      const nativeDetails = buildNativeSparseDetails(input.path, nativeAttempt.plan);
+      if (nativeDetails) {
+        if (signal?.aborted) throw new Error("Operation aborted");
+        const handle = await open(absolutePath, "r+");
+        try {
+          if (nativeAttempt.plan.positionalWrites) {
+            await applyPositionalWrites(handle, nativeAttempt.plan.positionalWrites);
+          } else if (nativeAttempt.plan.suffixWrite && nativeAttempt.plan.suffixBytes) {
+            await applyPositionalWrites(handle, [
+              {
+                position: nativeAttempt.plan.suffixWrite.position,
+                bytes: nativeAttempt.plan.suffixBytes,
+              },
+            ]);
+            await handle.truncate(
+              nativeAttempt.plan.suffixWrite.position + nativeAttempt.plan.suffixBytes.length,
+            );
+          } else return undefined;
+        } finally {
+          await handle.close();
+        }
+        if (signal?.aborted) throw new Error("Operation aborted");
+        onAcceleratedFileSize?.(rawBytes.length);
+        return {
+          content: [
+            { type: "text", text: `Successfully replaced ${input.edits.length} block(s) in ${input.path}.` },
+          ],
+          details: nativeDetails,
+        };
+      }
+    }
+
     const rawContent = rawBytes.toString("utf8");
-    const bom = rawContent.startsWith("\uFEFF") ? "\uFEFF" : "";
     const content = bom ? rawContent.slice(1) : rawContent;
     const lineEnding = detectLineEnding(content);
     const normalizedContent = normalizeToLf(content);
-    const contentIsAscii = isAscii(rawBytes.subarray(Buffer.byteLength(bom)));
-    const selectedPlan = selectExactEditPlan(rawBytes, bom, normalizedContent, input, contentIsAscii);
+    const contentIsAscii = isAscii(rawBytes.subarray(bomByteLength));
+    const selectedPlan = selectExactEditPlan(
+      rawBytes,
+      bom,
+      normalizedContent,
+      input,
+      contentIsAscii,
+      nativeAttempt,
+    );
     if (!selectedPlan) return undefined;
     const { plan } = selectedPlan;
 

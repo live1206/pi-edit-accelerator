@@ -86,11 +86,32 @@ Twenty-run end-to-end medians against the TypeScript baseline were:
 
 Raw reports are in `.artifacts/native-phase2-20260920/`. Phase 2 clears the preview gate on both large-file buckets and write strategies. Positional combined behavior also clears its gate. Fresh execution remains unchanged because it still uses JavaScript decode and assembly. Completed-preview suffix execution regresses because Phase 2 intentionally moves the previously eager decode out of preview, then pays that cost during execution. The combined suffix result improves only modestly. Native execution-time suffix assembly is therefore required before the hybrid path can satisfy the complete lifecycle gates.
 
+## Phase 3 native execution prototype
+
+Fresh execution now performs planning and, when needed, suffix assembly in one native call. TypeScript retains the mutation queue and filesystem writes. Execution reusing preview metadata validates the complete current byte buffer before making one native suffix-assembly call. Positional preview plans continue to write their bounded replacement buffers directly.
+
+Twenty-run end-to-end medians against the TypeScript baseline were:
+
+| Size | Strategy | Preview | Fresh execution | In-flight combined | Completed-preview execution |
+|---|---|---:|---:|---:|---:|
+| approximately 3 MB | positional | 53.1% faster | 78.7% faster | 53.7% faster | 8.6% slower |
+| approximately 3 MB | suffix | 61.5% faster | 73.9% faster | 43.0% faster | 9.5% faster |
+| approximately 6 MB | positional | 48.8% faster | 82.1% faster | 55.2% faster | 4.2% faster |
+| approximately 6 MB | suffix | 52.5% faster | 79.4% faster | 62.2% faster | 55.2% faster |
+
+A separate 50-run check of the approximately 3 MB completed-preview path found positional median 1.2% faster and suffix median 8.1% faster. Native p95 was 1.91 ms higher for positional and 1.37 ms higher for suffix, both within the 2 ms absolute compatibility ceiling. The earlier 20-run p95 comparison was therefore dominated by run-to-run variance.
+
+Five-run CPU-profile medians were 9.80 ms for preview and 8.99 ms for fresh execution, versus the TypeScript profile medians of 23.96 ms and 51.16 ms. Full-file JavaScript decode, replacement assembly, and UTF-8 re-encoding are absent from the native fresh-execution hotspot list.
+
+Raw reports are in `.artifacts/native-phase3-20260920/`; CPU profiles are in `.artifacts/native-phase3-profile-20260920/`. Phase 3 clears the large-file median gates for preview, fresh execution, and combined execution. Completed-preview execution remains within the defined absolute regression ceilings on the repeated 3 MB check and improves materially for 6 MB suffix writes.
+
+The 50 KB and 500 KB matrix also remained within the small-file gates. The largest 50 KB median and p95 regressions were 0.12 ms and 0.48 ms. Initial 500 KB samples showed two p95 deltas just over the 0.5 ms ceiling; a 50-run rerun reduced suffix in-flight p95 by 0.71 ms and increased completed-preview p95 by only 0.30 ms. Raw small-file reports are in `.artifacts/native-phase3-small-20260920/`.
+
 ## Remaining validation work
 
 Before adoption:
 
 1. Add reproducible peak RSS, allocated-byte, and GC measurements required by the adoption gates.
 2. Run and export the 100–200-call privacy-safe pilot across multiple Pi processes.
-3. Implement and measure native execution-time suffix assembly and fresh-execution preparation.
-4. Record cold extension startup and lazy native-load latency separately.
+3. Record cold extension startup and lazy native-load latency separately.
+4. Validate the native implementation on the remaining correctness and platform matrix before adoption.

@@ -45,6 +45,7 @@ pub struct NativePlan {
     pub replacements: Vec<NativeReplacement>,
     pub positional_writes: Option<Vec<NativePositionalWrite>>,
     pub suffix_write: Option<NativeSuffixWrite>,
+    pub suffix_bytes: Option<Buffer>,
     pub diff_windows: Option<Vec<NativeDiffWindow>>,
 }
 
@@ -151,9 +152,7 @@ fn build_diff_windows(
         .collect()
 }
 
-#[napi]
-pub fn plan_ascii_edits(content: Buffer, edits: Vec<NativeEdit>) -> Option<NativePlan> {
-    let content = content.as_ref();
+fn plan_ascii_edits_impl(content: &[u8], edits: Vec<NativeEdit>) -> Option<NativePlan> {
     if content.is_empty() || !content.is_ascii() || content.contains(&b'\r') || edits.is_empty() {
         return None;
     }
@@ -268,8 +267,72 @@ pub fn plan_ascii_edits(content: Buffer, edits: Vec<NativeEdit>) -> Option<Nativ
         replacements,
         positional_writes: equal_lengths.then_some(positional_writes),
         suffix_write,
+        suffix_bytes: None,
         diff_windows,
     })
+}
+
+fn assemble_suffix(
+    content: &[u8],
+    replacements: &[NativeReplacement],
+    position: usize,
+    replacement_index: usize,
+) -> Option<Vec<u8>> {
+    if position > content.len() || replacement_index >= replacements.len() {
+        return None;
+    }
+    let mut output = Vec::with_capacity(content.len() - position);
+    let mut content_offset = position;
+    for replacement in &replacements[replacement_index..] {
+        let match_index = usize::try_from(replacement.byte_offset).ok()?;
+        let match_length = usize::try_from(replacement.old_byte_length).ok()?;
+        if match_index < content_offset || match_index.checked_add(match_length)? > content.len() {
+            return None;
+        }
+        output.extend_from_slice(&content[content_offset..match_index]);
+        output.extend_from_slice(replacement.new_text.as_bytes());
+        content_offset = match_index + match_length;
+    }
+    output.extend_from_slice(&content[content_offset..]);
+    Some(output)
+}
+
+#[napi]
+pub fn plan_ascii_edits(content: Buffer, edits: Vec<NativeEdit>) -> Option<NativePlan> {
+    plan_ascii_edits_impl(content.as_ref(), edits)
+}
+
+#[napi]
+pub fn prepare_ascii_execution(content: Buffer, edits: Vec<NativeEdit>) -> Option<NativePlan> {
+    let mut plan = plan_ascii_edits_impl(content.as_ref(), edits)?;
+    if let Some(suffix) = &plan.suffix_write {
+        plan.suffix_bytes = Some(
+            assemble_suffix(
+                content.as_ref(),
+                &plan.replacements,
+                usize::try_from(suffix.position).ok()?,
+                usize::try_from(suffix.replacement_index).ok()?,
+            )?
+            .into(),
+        );
+    }
+    Some(plan)
+}
+
+#[napi]
+pub fn assemble_ascii_suffix(
+    content: Buffer,
+    replacements: Vec<NativeReplacement>,
+    position: u32,
+    replacement_index: u32,
+) -> Option<Buffer> {
+    assemble_suffix(
+        content.as_ref(),
+        &replacements,
+        usize::try_from(position).ok()?,
+        usize::try_from(replacement_index).ok()?,
+    )
+    .map(Into::into)
 }
 
 #[cfg(test)]
@@ -295,6 +358,19 @@ mod tests {
         assert_eq!(plan.replacements[1].first_line, 2);
         assert!(plan.positional_writes.is_some());
         assert!(plan.suffix_write.is_none());
+    }
+
+    #[test]
+    fn assembles_a_length_changing_suffix() {
+        let plan = prepare_ascii_execution(
+            Buffer::from(b"first\nmiddle\nlast\n".to_vec()),
+            vec![edit("first", "first expanded")],
+        )
+        .unwrap();
+        assert_eq!(
+            plan.suffix_bytes.unwrap().as_ref(),
+            b"first expanded\nmiddle\nlast\n"
+        );
     }
 
     #[test]
