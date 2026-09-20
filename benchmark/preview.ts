@@ -15,6 +15,31 @@ type RenderCall = NonNullable<EditDefinition["renderCall"]>;
 type Theme = Parameters<RenderCall>[1];
 type RenderContext = Parameters<RenderCall>[2];
 
+interface Options {
+  equalByteLength: boolean;
+  runs: number;
+  targetBytes: number;
+}
+
+function parsePositiveInteger(value: string | undefined, flag: string): number {
+  const parsed = Number.parseInt(value ?? "", 10);
+  if (!Number.isSafeInteger(parsed) || parsed < 1) throw new Error(`${flag} must be a positive integer`);
+  return parsed;
+}
+
+function parseArgs(args: string[]): Options {
+  const options: Options = { equalByteLength: false, runs: 10, targetBytes: 5_242_900 };
+  for (let index = 0; index < args.length; index++) {
+    const arg = args[index];
+    if (arg === "--equal-byte-length") options.equalByteLength = true;
+    else if (arg === "--runs") options.runs = parsePositiveInteger(args[++index], arg);
+    else if (arg === "--size-bytes") options.targetBytes = parsePositiveInteger(args[++index], arg);
+    else throw new Error(`Unknown option: ${arg}`);
+  }
+  return options;
+}
+
+const options = parseArgs(process.argv.slice(2));
 const identity = (text: string): string => text;
 const theme = new Proxy(
   { fg: (_name: string, text: string) => text, bg: (_name: string, text: string) => text, bold: identity },
@@ -34,14 +59,18 @@ function loadExtensionTool(): EditDefinition {
 }
 
 function makeFixture(): string {
-  return `FIRST_MARKER\n${"0123456789abcdef0123456789abcdef\n".repeat(158_875)}LAST_MARKER\n`;
+  const first = "FIRST_MARKER\n";
+  const line = "0123456789abcdef0123456789abcdef\n";
+  const last = "LAST_MARKER\n";
+  const repetitions = Math.max(0, Math.floor((options.targetBytes - first.length - last.length) / line.length));
+  return `${first}${line.repeat(repetitions)}${last}`;
 }
 
 const input: EditToolInput = {
   path: "large.txt",
   edits: [
-    { oldText: "FIRST_MARKER", newText: "FIRST_CHANGED" },
-    { oldText: "LAST_MARKER", newText: "LAST_CHANGED" },
+    { oldText: "FIRST_MARKER", newText: options.equalByteLength ? "FIRST_CHANGE" : "FIRST_CHANGED" },
+    { oldText: "LAST_MARKER", newText: options.equalByteLength ? "LAST_CHANGE" : "LAST_CHANGED" },
   ],
 };
 
@@ -75,6 +104,7 @@ function summarize(samples: number[]) {
   samples.sort((left, right) => left - right);
   return {
     medianMs: samples[Math.floor(samples.length / 2)],
+    p95Ms: samples[Math.min(samples.length - 1, Math.ceil(samples.length * 0.95) - 1)],
     minMs: samples[0],
     maxMs: samples[samples.length - 1],
     samplesMs: samples,
@@ -88,7 +118,7 @@ await measurePreview(builtIn);
 await measurePreview(extension);
 const builtInSamples: number[] = [];
 const extensionSamples: number[] = [];
-for (let index = 0; index < 10; index++) {
+for (let index = 0; index < options.runs; index++) {
   if (index % 2 === 0) {
     builtInSamples.push(await measurePreview(builtIn));
     extensionSamples.push(await measurePreview(extension));
@@ -103,7 +133,9 @@ process.stdout.write(
       runtime: process.version,
       operatingSystem: { platform: platform(), release: release(), arch: process.arch },
       cpu: cpus()[0]?.model ?? "unknown",
-      runs: 10,
+      runs: options.runs,
+      fixtureBytes: Buffer.byteLength(makeFixture()),
+      writeStrategy: options.equalByteLength ? "positional" : "suffix",
       builtIn: summarize(builtInSamples),
       extension: summarize(extensionSamples),
     },

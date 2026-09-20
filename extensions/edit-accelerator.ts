@@ -1,3 +1,4 @@
+import { randomUUID } from "node:crypto";
 import {
   createEditToolDefinition,
   type EditToolInput,
@@ -14,6 +15,7 @@ import {
   tryPrepareExactEdit,
 } from "../src/exact-edit.ts";
 import { createEditAcceleratorStats, formatEditAcceleratorStats } from "../src/stats.ts";
+import { exportEditAcceleratorStats } from "../src/stats-export.ts";
 
 interface ExpiringPromise<T> {
   key: string;
@@ -29,6 +31,8 @@ interface PrefetchPromise extends ExpiringPromise<PrefetchedExactEditFile> {
 export default function editAccelerator(pi: ExtensionAPI): void {
   const builtInEdit = createEditToolDefinition(process.cwd());
   const stats = createEditAcceleratorStats();
+  const processSessionId = randomUUID();
+  let snapshotIntervalId = randomUUID();
   const previewStates = new WeakMap<object, { argsKey: string; pending: boolean; fallback: boolean }>();
   let prefetchedFile: PrefetchPromise | undefined;
   let preparedPreview: ExpiringPromise<PreparedExactEdit> | undefined;
@@ -143,9 +147,10 @@ export default function editAccelerator(pi: ExtensionAPI): void {
       const matchingPreview = inputKey && preparedPreview?.key === inputKey ? preparedPreview : undefined;
       if (matchingPreview) clearPreparedPreview();
       const prepared = await matchingPreview?.promise;
+      const recordEligibleFileSize = (bytes: number): void => stats.recordEligibleFileSize(bytes);
       const accelerated = matchingPreview
-        ? prepared && (await tryExecuteExactEdit(input, signal, ctx, prepared))
-        : await tryExecuteExactEdit(input, signal, ctx);
+        ? prepared && (await tryExecuteExactEdit(input, signal, ctx, prepared, recordEligibleFileSize))
+        : await tryExecuteExactEdit(input, signal, ctx, undefined, recordEligibleFileSize);
       if (accelerated) {
         if (prepared && accelerated.details === prepared.result.details) {
           stats.recordPreviewPlanReuse();
@@ -168,10 +173,28 @@ export default function editAccelerator(pi: ExtensionAPI): void {
     },
   });
 
+  pi.registerCommand("edit-accelerator-export-stats", {
+    description: "Export privacy-safe edit accelerator statistics as JSON",
+    handler: async (args, ctx) => {
+      try {
+        const outputPath = await exportEditAcceleratorStats(
+          args,
+          processSessionId,
+          snapshotIntervalId,
+          stats.snapshot(),
+        );
+        ctx.ui.notify(`Edit accelerator statistics exported to ${outputPath}`, "info");
+      } catch (error) {
+        ctx.ui.notify(error instanceof Error ? error.message : String(error), "error");
+      }
+    },
+  });
+
   pi.registerCommand("edit-accelerator-reset-stats", {
     description: "Reset aggregate edit accelerator counters",
     handler: async (_args, ctx) => {
       stats.reset();
+      snapshotIntervalId = randomUUID();
       ctx.ui.notify("Edit accelerator statistics reset.", "info");
     },
   });

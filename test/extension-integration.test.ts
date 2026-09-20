@@ -1,4 +1,4 @@
-import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { mkdtemp, readFile, readdir, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
@@ -267,6 +267,39 @@ describe("edit accelerator extension", () => {
     }
   });
 
+  it("matches built-in bytes when adjacent replacements form a surrogate pair", async () => {
+    initTheme("dark");
+    for (const prepared of [false, true]) {
+      const extensionDirectory = await createDirectory();
+      const builtInDirectory = await createDirectory();
+      await writeFile(join(extensionDirectory, "fixture.txt"), "ab\n", "utf8");
+      await writeFile(join(builtInDirectory, "fixture.txt"), "ab\n", "utf8");
+      const input: EditToolInput = {
+        path: "fixture.txt",
+        edits: [
+          { oldText: "a", newText: "\ud83d" },
+          { oldText: "b", newText: "\ude00" },
+        ],
+      };
+      const extensionTool = loadExtensionTool();
+      let extensionResult;
+      if (prepared) {
+        const preview = renderPreview(extensionTool, extensionDirectory, input, true);
+        [extensionResult] = await Promise.all([
+          execute(extensionTool, extensionDirectory, input),
+          preview.done,
+        ]);
+      } else extensionResult = await execute(extensionTool, extensionDirectory, input);
+      const builtInResult = await execute(createEditToolDefinition(builtInDirectory), builtInDirectory, input);
+
+      expect(extensionResult).toEqual(builtInResult);
+      expect(await readFile(join(extensionDirectory, "fixture.txt"))).toEqual(
+        await readFile(join(builtInDirectory, "fixture.txt")),
+      );
+      expect(await readFile(join(extensionDirectory, "fixture.txt"), "utf8")).toBe("😀\n");
+    }
+  });
+
   it("matches built-in bytes when replacement text splits a surrogate pair", async () => {
     initTheme("dark");
     for (const newText of ["XYZ", "X"]) {
@@ -319,6 +352,59 @@ describe("edit accelerator extension", () => {
     expect(await readFile(join(extensionDirectory, "fixture.txt"))).toEqual(
       await readFile(join(builtInDirectory, "fixture.txt")),
     );
+  });
+
+  it("exports privacy-safe statistics and starts a new interval after reset", async () => {
+    const directory = await createDirectory();
+    const commands = new Map<
+      string,
+      { handler: (args: string, ctx: { ui: { notify(message: string, level: string): void } }) => Promise<void> }
+    >();
+    let tool: ReturnType<typeof createEditToolDefinition> | undefined;
+    editAccelerator({
+      registerTool(registered: unknown) {
+        tool = registered as ReturnType<typeof createEditToolDefinition>;
+      },
+      registerCommand(name: string, options: unknown) {
+        commands.set(name, options as (typeof commands extends Map<string, infer T> ? T : never));
+      },
+    } as unknown as ExtensionAPI);
+    const notifications: Array<{ message: string; level: string }> = [];
+    const context = {
+      ui: {
+        notify(message: string, level: string) {
+          notifications.push({ message, level });
+        },
+      },
+    };
+    const exportCommand = commands.get("edit-accelerator-export-stats");
+    const resetCommand = commands.get("edit-accelerator-reset-stats");
+    expect(tool).toBeDefined();
+    expect(exportCommand).toBeDefined();
+    expect(resetCommand).toBeDefined();
+
+    await writeFile(join(directory, "fixture.txt"), "before\n", "utf8");
+    await execute(tool!, directory, {
+      path: "fixture.txt",
+      edits: [{ oldText: "before", newText: "after" }],
+    });
+    await exportCommand!.handler(directory, context);
+    await resetCommand!.handler("", context);
+    await exportCommand!.handler(directory, context);
+
+    const files = (await readdir(directory)).filter((name) => name.endsWith(".json"));
+    expect(files).toHaveLength(2);
+    const snapshots = await Promise.all(
+      files.map(async (name) => JSON.parse(await readFile(join(directory, name), "utf8"))),
+    );
+    expect(snapshots[0].processSessionId).toBe(snapshots[1].processSessionId);
+    expect(snapshots[0].snapshotIntervalId).not.toBe(snapshots[1].snapshotIntervalId);
+    const populated = snapshots.find((snapshot) => snapshot.statistics.totalCalls === 1);
+    const reset = snapshots.find((snapshot) => snapshot.statistics.totalCalls === 0);
+    expect(populated.statistics.eligibleFileSizes.lessThan100Kb).toBe(1);
+    expect(reset.statistics.eligibleFileSizes.lessThan100Kb).toBe(0);
+    expect(JSON.stringify(snapshots)).not.toContain(directory);
+    expect(notifications.every(({ level }) => level === "info")).toBe(true);
   });
 
   it("registers one edit override with the built-in contract", () => {

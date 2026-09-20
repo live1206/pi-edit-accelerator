@@ -14,6 +14,14 @@ export interface SparseDiffResult {
   firstChangedLine: number;
 }
 
+export interface SparseDiffWindow {
+  oldStartLine: number;
+  oldContent: string;
+  newContent: string;
+  hasEarlierContent: boolean;
+  hasLaterContent: boolean;
+}
+
 interface ReplacementGroup {
   firstLine: number;
   lastLine: number;
@@ -229,6 +237,63 @@ function buildDisplayDiff(
 
   if (previousOldEnd < oldLineCount) output.push(` ${"".padStart(width)} ...`);
   return { diff: output.join("\n"), firstChangedLine: firstChangedLine ?? 1 };
+}
+
+export function buildSparseDiffsFromWindows(
+  path: string,
+  windows: readonly SparseDiffWindow[],
+  oldLineCount: number,
+  oldEndsWithNewline: boolean,
+  contextLines = 4,
+): SparseDiffResult | undefined {
+  const hunks: Diff.StructuredPatchHunk[] = [];
+  let cumulativeLineDelta = 0;
+  for (const window of windows) {
+    const local = Diff.structuredPatch(
+      path,
+      path,
+      window.oldContent,
+      window.newContent,
+      undefined,
+      undefined,
+      { context: contextLines },
+    );
+    if (
+      needsExpandedContext(
+        local.hunks,
+        contextLines,
+        window.hasEarlierContent,
+        window.hasLaterContent,
+      )
+    ) {
+      return undefined;
+    }
+    const adjustedHunks = local.hunks.map((hunk) => ({
+      ...hunk,
+      oldStart: hunk.oldStart + window.oldStartLine,
+      newStart: hunk.newStart + window.oldStartLine + cumulativeLineDelta,
+    }));
+    const previousHunk = hunks[hunks.length - 1];
+    const firstAdjustedHunk = adjustedHunks[0];
+    if (
+      previousHunk &&
+      firstAdjustedHunk &&
+      firstAdjustedHunk.oldStart <= previousHunk.oldStart + previousHunk.oldLines
+    ) {
+      return undefined;
+    }
+    hunks.push(...adjustedHunks);
+    cumulativeLineDelta += countNewlines(window.newContent) - countNewlines(window.oldContent);
+  }
+
+  const patch = Diff.formatPatch(
+    { oldFileName: path, newFileName: path, oldHeader: undefined, newHeader: undefined, hunks },
+    Diff.FILE_HEADERS_ONLY,
+  );
+  const newLineCount = oldLineCount + cumulativeLineDelta;
+  const displayedOldLineCount = oldEndsWithNewline ? oldLineCount - 1 : oldLineCount;
+  const display = buildDisplayDiff(hunks, displayedOldLineCount, Math.max(oldLineCount, newLineCount));
+  return { diff: display.diff, patch, firstChangedLine: display.firstChangedLine };
 }
 
 export function buildSparseDiffs(

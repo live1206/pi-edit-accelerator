@@ -360,6 +360,46 @@ describe("exact edit fast path", () => {
     expect(result?.details).not.toBe(prepared?.result.details);
   });
 
+  it("reports file size only after accelerated execution succeeds", async () => {
+    for (const usePrepared of [false, true]) {
+      const directory = await mkdtemp(join(tmpdir(), "pi-edit-accelerator-"));
+      tempDirectories.push(directory);
+      const path = join(directory, "fixture.txt");
+      await writeFile(path, "before\n", "utf8");
+      const input: EditToolInput = {
+        path: "fixture.txt",
+        edits: [{ oldText: "before", newText: "after!" }],
+      };
+      const prepared = usePrepared ? await tryPrepareExactEdit(input, directory) : undefined;
+      const sizes: number[] = [];
+
+      const result = await tryExecuteExactEdit(
+        input,
+        undefined,
+        { cwd: directory } as ExtensionContext,
+        prepared,
+        (bytes) => sizes.push(bytes),
+      );
+
+      expect(result).toBeDefined();
+      expect(sizes).toEqual([7]);
+    }
+
+    const directory = await mkdtemp(join(tmpdir(), "pi-edit-accelerator-"));
+    tempDirectories.push(directory);
+    await writeFile(join(directory, "fixture.txt"), "same\nsame\n", "utf8");
+    const sizes: number[] = [];
+    const result = await tryExecuteExactEdit(
+      { path: "fixture.txt", edits: [{ oldText: "same", newText: "changed" }] },
+      undefined,
+      { cwd: directory } as ExtensionContext,
+      undefined,
+      (bytes) => sizes.push(bytes),
+    );
+    expect(result).toBeUndefined();
+    expect(sizes).toEqual([]);
+  });
+
   it("preserves BOM and CRLF and returns built-in-compatible details", async () => {
     const directory = await mkdtemp(join(tmpdir(), "pi-edit-accelerator-"));
     tempDirectories.push(directory);

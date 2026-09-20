@@ -36,6 +36,8 @@
     "bench:prefetch": "tsx benchmark/prefetch.ts",
     "bench:suffix-write": "tsx benchmark/suffix-write.ts",
     "bench:group-scaling": "tsx benchmark/group-scaling.ts",
+    "native:build": "cargo build --release --manifest-path native/Cargo.toml && cp native/target/release/libpi_edit_accelerator_native.so native/pi-edit-accelerator-native.linux-x64-gnu.node",
+    "native:test": "npm run native:build && cargo test --manifest-path native/Cargo.toml && vitest --run",
     "profile": "tsx benchmark/profile-candidate.ts",
     "profile:analyze": "tsx benchmark/analyze-profile.ts",
     "check": "tsc --noEmit",

@@ -17,6 +17,8 @@ interface Options {
   runs: number;
   warmup: number;
   output?: string;
+  equalByteLength: boolean;
+  targetBytes: number;
 }
 
 interface Statistics {
@@ -38,11 +40,13 @@ function parsePositiveInteger(value: string | undefined, flag: string, allowZero
 }
 
 function parseArgs(args: string[]): Options {
-  const options: Options = { runs: 20, warmup: 3 };
+  const options: Options = { runs: 20, warmup: 3, equalByteLength: false, targetBytes: 5_242_900 };
   for (let index = 0; index < args.length; index++) {
     const arg = args[index];
     if (arg === "--runs") options.runs = parsePositiveInteger(args[++index], arg);
     else if (arg === "--warmup") options.warmup = parsePositiveInteger(args[++index], arg, true);
+    else if (arg === "--equal-byte-length") options.equalByteLength = true;
+    else if (arg === "--size-bytes") options.targetBytes = parsePositiveInteger(args[++index], arg);
     else if (arg === "--output") {
       const output = args[++index];
       if (!output) throw new Error("--output requires a path");
@@ -79,16 +83,21 @@ function loadExtensionTool(): EditDefinition {
   return registered;
 }
 
+const options = parseArgs(process.argv.slice(2));
+
 function makeFixture(): string {
+  const first = "FIRST_MARKER\n";
   const line = "0123456789abcdef0123456789abcdef\n";
-  return `FIRST_MARKER\n${line.repeat(158_875)}LAST_MARKER\n`;
+  const last = "LAST_MARKER\n";
+  const repetitions = Math.max(0, Math.floor((options.targetBytes - first.length - last.length) / line.length));
+  return `${first}${line.repeat(repetitions)}${last}`;
 }
 
 const input: EditToolInput = {
   path: "large.txt",
   edits: [
-    { oldText: "FIRST_MARKER", newText: "FIRST_CHANGED" },
-    { oldText: "LAST_MARKER", newText: "LAST_CHANGED" },
+    { oldText: "FIRST_MARKER", newText: options.equalByteLength ? "FIRST_CHANGE" : "FIRST_CHANGED" },
+    { oldText: "LAST_MARKER", newText: options.equalByteLength ? "LAST_CHANGE" : "LAST_CHANGED" },
   ],
 };
 
@@ -113,7 +122,6 @@ async function executeSample(tool: EditDefinition, fixture: string) {
 }
 
 async function main(): Promise<void> {
-  const options = parseArgs(process.argv.slice(2));
   const fixture = makeFixture();
   const builtIn = createEditToolDefinition(process.cwd());
   const extension = loadExtensionTool();
@@ -159,7 +167,11 @@ async function main(): Promise<void> {
     runtime: { name: "node", version: process.version },
     operatingSystem: { platform: platform(), release: release(), arch: process.arch },
     cpu: cpus()[0]?.model ?? "unknown",
-    fixture: { bytes: Buffer.byteLength(fixture), edits: input.edits.length },
+    fixture: {
+      bytes: Buffer.byteLength(fixture),
+      edits: input.edits.length,
+      writeStrategy: options.equalByteLength ? "positional" : "suffix",
+    },
     configuration: { runs: options.runs, warmup: options.warmup, alternatingOrder: true },
     baselineA: { name: "built-in edit", wallTimeMs: builtInStatistics },
     baselineB: { name: "isolated extension", wallTimeMs: extensionStatistics },

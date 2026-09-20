@@ -103,10 +103,11 @@ Use these process-local commands during a session:
 
 ```text
 /edit-accelerator-stats
+/edit-accelerator-export-stats <directory>
 /edit-accelerator-reset-stats
 ```
 
-They report only total, accelerated, fallback, prefetch, preview-plan reuse, positional-write, and suffix-write counts plus the fast-path percentage. No paths, arguments, replacement text, or file contents are retained.
+Statistics include aggregate edit outcomes, optimization counts, fast-path percentage, and eligible-file size buckets (`<100 KB`, `100 KB-1 MB`, `1-5 MB`, and `>5 MB`). Export writes a timestamped JSON snapshot with random process-session and snapshot-interval identifiers. No paths, arguments, replacement text, file contents, or exact file sizes are retained. Export once before each pilot process exits; reset starts a new interval within the same process session.
 
 ## Other edit overrides
 
@@ -130,6 +131,12 @@ cd pi-edit-accelerator
 npm install --ignore-scripts
 npm run check
 npm test
+```
+
+On Linux x64 with Rust installed, build and validate the optional Phase 1 native planner:
+
+```sh
+npm run native:test
 ```
 
 Benchmarks:
@@ -157,16 +164,17 @@ See [docs/edit-acceleration.md](docs/edit-acceleration.md) for:
 - benchmark methodology;
 - current compatibility coverage;
 - CPU-profiling plan;
-- the decision gate for a possible Rust implementation.
+- the decision gate for native acceleration.
+
+See [docs/rust-hybrid-implementation-plan.md](docs/rust-hybrid-implementation-plan.md) for the hybrid design and [docs/rust-hybrid-validation.md](docs/rust-hybrid-validation.md) for current validation results.
 
 ## Roadmap
 
-1. Collect real-session accelerated/fallback rates.
-2. Add permission, symlink, abort, concurrency, malformed-preview, and cross-platform tests.
-3. Collect prefetch, preview-plan reuse, positional-write, and suffix-write rates during the pilot.
-4. Revisit scan fusion only if a native or lower-overhead implementation becomes available.
-5. Validate Linux, macOS, Windows, Node, and Bun.
-6. Prototype Rust only if a coarse CPU-bound stage still offers meaningful savings after JS/native conversion.
+1. Complete the privacy-safe 100–200-call pilot.
+2. Prototype buffer-first native preview preparation.
+3. Add startup, memory, allocation, and GC measurements.
+4. Add permission, symlink, abort, concurrency, malformed-preview, and cross-platform tests.
+5. Validate Linux, macOS, Windows, Node, and Bun before broad rollout.
 
 ## License
 

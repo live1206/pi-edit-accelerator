@@ -2,4 +2,6 @@ node_modules/
 .artifacts/
 coverage/
 dist/
+native/target/
+native/*.node
 *.log

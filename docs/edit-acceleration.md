@@ -95,10 +95,11 @@ The extension provides process-local, privacy-safe commands:
 
 ```text
 /edit-accelerator-stats
+/edit-accelerator-export-stats <directory>
 /edit-accelerator-reset-stats
 ```
 
-They report only:
+They report or export only:
 
 - total edit calls
 - accelerated calls
@@ -107,9 +108,10 @@ They report only:
 - prefetched files
 - positional writes
 - suffix writes
+- eligible-file size buckets (`<100 KB`, `100 KB-1 MB`, `1-5 MB`, and `>5 MB`)
 - fast-path percentage
 
-No paths, arguments, old text, replacement text, or file contents are retained.
+JSON exports also contain random process-session and snapshot-interval identifiers plus the collection timestamp. No paths, arguments, old text, replacement text, file contents, or exact file sizes are retained. Export once before each pilot process exits; reset starts a new interval within the same process session.
 
 ## Measured results
 
@@ -265,6 +267,8 @@ A narrower ASCII experiment was retained. Native `isAscii` validation used 0.23 
 An initial transitive merge implementation repeatedly recomputed a growing prefix and regressed from 356 ms at 100 edits to 5,825 ms at 200 edits. The final two-phase policy builds each line-local group once and computes any shared structural group once. The same fixtures measured 11.67 ms and 33.41 ms, versus Pi's 101.50 ms and 366.12 ms.
 
 ## Rust decision gate
+
+See [Hybrid Rust acceleration plan](rust-hybrid-implementation-plan.md) for the proposed native boundary, delivery phases, correctness requirements, packaging strategy, and performance gates.
 
 Do not add Rust solely because candidate C still has measurable latency. A native backend is justified only if profiling shows a substantial CPU-bound region that Rust can replace through one coarse call.
 
