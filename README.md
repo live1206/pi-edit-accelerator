@@ -33,7 +33,19 @@ An exploratory interactive-preview benchmark measured:
 | Pi built-in preview | 299.08 ms |
 | Sparse extension preview | 15.69 ms |
 
-Version 0.1.4 measured 31.42 ms preview-to-write latency for length-changing replacements and 16.62 ms for equal-byte-length positional replacements.
+Version 0.1.5 also preserves sparse scaling for large batches of independent line-local edits:
+
+| Batch execution | Sparse extension | Pi built-in | Median reduction |
+|---|---:|---:|---:|
+| 100 edits, 140 KB file | 11.67 ms | 101.50 ms | 89% |
+| 200 edits, 278 KB file | 33.41 ms | 366.12 ms | 91% |
+
+Specialized writes avoid rewriting unchanged file regions:
+
+| Prepared write path | Sparse write | Full-file write | Median reduction |
+|---|---:|---:|---:|
+| Equal-byte-length positional writes | 4.50 ms | 28.32 ms | 84% |
+| Length-changing near-end suffix write | 5.67 ms | 26.91 ms | 79% |
 
 These results demonstrate large-file scaling potential, not guaranteed gains for every edit. Normal-session impact depends on file sizes and fast-path frequency.
 
