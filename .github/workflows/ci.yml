@@ -42,3 +42,4 @@ jobs:
           name: native-linux-x64-gnu
           path: .artifacts/live1206-pi-edit-accelerator-linux-x64-gnu-*.tgz
           if-no-files-found: error
+          include-hidden-files: true
