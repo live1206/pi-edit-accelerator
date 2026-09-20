@@ -1,5 +1,6 @@
 import { mkdir, writeFile } from "node:fs/promises";
 import { resolve } from "node:path";
+import type { NativeBackendStatsSnapshot } from "./native-planner.ts";
 import type { EditAcceleratorStatsSnapshot } from "./stats.ts";
 
 export interface EditAcceleratorStatsExport {
@@ -8,6 +9,7 @@ export interface EditAcceleratorStatsExport {
   snapshotIntervalId: string;
   collectedAt: string;
   statistics: EditAcceleratorStatsSnapshot;
+  nativeBackend: NativeBackendStatsSnapshot;
 }
 
 function timestampForFileName(date: Date): string {
@@ -19,6 +21,7 @@ export async function exportEditAcceleratorStats(
   processSessionId: string,
   snapshotIntervalId: string,
   statistics: EditAcceleratorStatsSnapshot,
+  nativeBackend: NativeBackendStatsSnapshot,
   collectedAt = new Date(),
 ): Promise<string> {
   const trimmedDirectory = directory.trim();
@@ -34,6 +37,7 @@ export async function exportEditAcceleratorStats(
     snapshotIntervalId,
     collectedAt: collectedAt.toISOString(),
     statistics,
+    nativeBackend,
   };
   await mkdir(outputDirectory, { recursive: true });
   await writeFile(outputPath, `${JSON.stringify(payload, null, 2)}\n`, {

@@ -14,6 +14,11 @@ import {
   tryPrefetchExactEditFile,
   tryPrepareExactEdit,
 } from "../src/exact-edit.ts";
+import {
+  formatNativeBackendStats,
+  getNativeBackendStats,
+  resetNativeBackendStats,
+} from "../src/native-planner.ts";
 import { createEditAcceleratorStats, formatEditAcceleratorStats } from "../src/stats.ts";
 import { exportEditAcceleratorStats } from "../src/stats-export.ts";
 
@@ -169,7 +174,10 @@ export default function editAccelerator(pi: ExtensionAPI): void {
   pi.registerCommand("edit-accelerator-stats", {
     description: "Show aggregate edit accelerator fast-path and fallback counts",
     handler: async (_args, ctx) => {
-      ctx.ui.notify(formatEditAcceleratorStats(stats.snapshot()), "info");
+      ctx.ui.notify(
+        `${formatEditAcceleratorStats(stats.snapshot())}\n${formatNativeBackendStats(getNativeBackendStats())}`,
+        "info",
+      );
     },
   });
 
@@ -182,6 +190,7 @@ export default function editAccelerator(pi: ExtensionAPI): void {
           processSessionId,
           snapshotIntervalId,
           stats.snapshot(),
+          getNativeBackendStats(),
         );
         ctx.ui.notify(`Edit accelerator statistics exported to ${outputPath}`, "info");
       } catch (error) {
@@ -194,6 +203,7 @@ export default function editAccelerator(pi: ExtensionAPI): void {
     description: "Reset aggregate edit accelerator counters",
     handler: async (_args, ctx) => {
       stats.reset();
+      resetNativeBackendStats();
       snapshotIntervalId = randomUUID();
       ctx.ui.notify("Edit accelerator statistics reset.", "info");
     },

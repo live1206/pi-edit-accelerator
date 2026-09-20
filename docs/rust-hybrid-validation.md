@@ -107,11 +107,28 @@ Raw reports are in `.artifacts/native-phase3-20260920/`; CPU profiles are in `.a
 
 The 50 KB and 500 KB matrix also remained within the small-file gates. The largest 50 KB median and p95 regressions were 0.12 ms and 0.48 ms. Initial 500 KB samples showed two p95 deltas just over the 0.5 ms ceiling; a 50-run rerun reduced suffix in-flight p95 by 0.71 ms and increased completed-preview p95 by only 0.30 ms. Raw small-file reports are in `.artifacts/native-phase3-small-20260920/`.
 
+## Phase 4 packaging and rollout validation
+
+The loader now tries the target-specific optional package before the development binary path. The initial package scaffold is `@live1206/pi-edit-accelerator-linux-x64-gnu`; it declares Linux, x64, and glibc constraints and contains only its README, manifest, and `.node` binary. `npm run native:package:linux-x64` produced a 240 KB tarball with a 496 KB unpacked size. The package is not published or added as a root optional dependency yet, so ordinary installs continue to use TypeScript unless a development binary is present.
+
+CI now has separate TypeScript-only and Linux x64 native jobs. The native job checks Rust formatting and Clippy, runs the complete native-loaded suite, builds the platform tarball, and uploads it as an artifact. Native observability now records hits, unsupported inputs, semantic declines, load and invocation failures, disabled-backend fallbacks, and TypeScript accelerator fallbacks in both the stats command and privacy-safe JSON export.
+
+A new `bench:resources` harness measures lazy cold-operation latency, extension registration, peak RSS, heap/external/array-buffer deltas, and GC activity under `--expose-gc`. Twenty-run 3 MB and 6 MB results found:
+
+- native warm wall time was 50.2–65.8% lower across preview and fresh execution;
+- peak RSS delta was lower in seven of eight cases; 6 MB suffix execution was 1.25 MiB higher, within the 16 MiB ceiling;
+- median heap delta was 49.6–98.1% lower for all previews and 3 MB executions, and only 0.3–0.5% higher for 6 MB executions;
+- no measured case added a major collection; where operation-time GC occurred, native pause time was about 3.2 ms lower;
+- extension registration changed by at most 0.18 ms, within the 1 ms startup ceiling;
+- the first native operation remained faster than TypeScript despite lazy addon loading.
+
+Net array-buffer deltas are not a valid cumulative allocation-byte metric: native execution intentionally returns an output buffer whose collection can occur after the measured operation. The allocation-byte gate therefore remains open pending an allocation profiler that includes external/native buffers. Raw resource reports are in `.artifacts/native-phase4-resources-20260920/`.
+
 ## Remaining validation work
 
 Before adoption:
 
-1. Add reproducible peak RSS, allocated-byte, and GC measurements required by the adoption gates.
-2. Run and export the 100–200-call privacy-safe pilot across multiple Pi processes.
-3. Record cold extension startup and lazy native-load latency separately.
-4. Validate the native implementation on the remaining correctness and platform matrix before adoption.
+1. Run and export the 100–200-call privacy-safe pilot across multiple Pi processes.
+2. Add a cumulative allocation profiler that accounts for external/native buffers.
+3. Validate Node and Bun on the intended macOS and Windows targets and add their platform packages before broad rollout.
+4. Publish the Linux platform package and add it as an optional dependency only after the pilot and remaining gates pass.

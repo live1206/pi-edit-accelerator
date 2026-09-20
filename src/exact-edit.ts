@@ -9,6 +9,7 @@ import {
   withFileMutationQueue,
 } from "@earendil-works/pi-coding-agent";
 import {
+  recordNativeTypeScriptFallback,
   tryNativeAsciiExecutionPlan,
   tryNativeAsciiPlan,
   tryNativeAsciiSuffix,
@@ -236,6 +237,7 @@ function selectExactEditPlan(
     return { plan: nativeAttempt.plan, nativePlan: nativeAttempt.plan };
   }
   if (nativeAttempt.status === "declined") return undefined;
+  recordNativeTypeScriptFallback();
   const plan = tryPlanExactEdits(normalizedContent, input, contentIsAscii);
   return plan && { plan };
 }
@@ -407,6 +409,7 @@ export async function tryPrepareExactEdit(
           },
         };
       }
+      recordNativeTypeScriptFallback();
     }
 
     const rawContent = rawBytes.toString("utf8");
@@ -589,6 +592,7 @@ export async function tryExecuteExactEdit(
           details: nativeDetails,
         };
       }
+      recordNativeTypeScriptFallback();
     }
 
     const rawContent = rawBytes.toString("utf8");

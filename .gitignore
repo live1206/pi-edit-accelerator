@@ -4,4 +4,6 @@ coverage/
 dist/
 native/target/
 native/*.node
+native/npm/*/*.node
+*.tgz
 *.log

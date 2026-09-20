@@ -67,13 +67,36 @@ export type NativePlanningAttempt =
   | { status: "declined" }
   | { status: "planned"; plan: NativeExactEditPlan };
 
+export interface NativeBackendStatsSnapshot {
+  nativeHits: number;
+  unsupportedInputs: number;
+  nativeDeclines: number;
+  loadFailures: number;
+  invocationFailures: number;
+  disabledFallbacks: number;
+  typeScriptFallbacks: number;
+}
+
 type LoaderState =
   | { status: "uninitialized" }
   | { status: "loaded"; binding: NativeBinding }
   | { status: "disabled" };
 
 let loaderState: LoaderState = { status: "uninitialized" };
+let nativeStats: NativeBackendStatsSnapshot = emptyNativeBackendStats();
 const require = createRequire(import.meta.url);
+
+function emptyNativeBackendStats(): NativeBackendStatsSnapshot {
+  return {
+    nativeHits: 0,
+    unsupportedInputs: 0,
+    nativeDeclines: 0,
+    loadFailures: 0,
+    invocationFailures: 0,
+    disabledFallbacks: 0,
+    typeScriptFallbacks: 0,
+  };
+}
 
 function normalizeToLf(text: string): string {
   return text.replace(/\r\n/g, "\n").replace(/\r/g, "\n");
@@ -84,9 +107,12 @@ function isAsciiString(text: string): boolean {
   return true;
 }
 
-function nativeFileName(): string | undefined {
+function nativeTarget(): { fileName: string; packageName: string } | undefined {
   if (process.platform === "linux" && process.arch === "x64") {
-    return "pi-edit-accelerator-native.linux-x64-gnu.node";
+    return {
+      fileName: "pi-edit-accelerator-native.linux-x64-gnu.node",
+      packageName: "@live1206/pi-edit-accelerator-linux-x64-gnu",
+    };
   }
   return undefined;
 }
@@ -94,16 +120,27 @@ function nativeFileName(): string | undefined {
 function loadNativeBinding(): NativeBinding | undefined {
   if (loaderState.status === "loaded") return loaderState.binding;
   if (loaderState.status === "disabled" || process.env.PI_EDIT_ACCELERATOR_NATIVE === "0") return undefined;
-  const fileName = nativeFileName();
-  if (!fileName) {
+  const target = nativeTarget();
+  if (!target) {
     loaderState = { status: "disabled" };
     return undefined;
   }
-  const path =
-    process.env.PI_EDIT_ACCELERATOR_NATIVE_PATH ??
-    resolve(dirname(fileURLToPath(import.meta.url)), "../native", fileName);
   try {
-    const binding = require(path) as NativeBinding;
+    let binding: NativeBinding;
+    const configuredPath = process.env.PI_EDIT_ACCELERATOR_NATIVE_PATH;
+    if (configuredPath) binding = require(configuredPath) as NativeBinding;
+    else {
+      try {
+        binding = require(target.packageName) as NativeBinding;
+      } catch {
+        const localPath = resolve(
+          dirname(fileURLToPath(import.meta.url)),
+          "../native",
+          target.fileName,
+        );
+        binding = require(localPath) as NativeBinding;
+      }
+    }
     if (
       typeof binding?.planAsciiEdits !== "function" ||
       typeof binding.prepareAsciiExecution !== "function" ||
@@ -114,6 +151,7 @@ function loadNativeBinding(): NativeBinding | undefined {
     loaderState = { status: "loaded", binding };
     return binding;
   } catch {
+    nativeStats.loadFailures++;
     loaderState = { status: "disabled" };
     return undefined;
   }
@@ -165,10 +203,15 @@ function tryNativePlan(
   mode: "preview" | "execution",
 ): NativePlanningAttempt {
   if (contentBytes.length > 0xffff_ffff || !isAscii(contentBytes) || contentBytes.includes(13)) {
+    nativeStats.unsupportedInputs++;
     return { status: "not-used" };
   }
   const edits = normalizedAsciiEdits(input);
-  if (!edits) return { status: "not-used" };
+  if (!edits) {
+    nativeStats.unsupportedInputs++;
+    return { status: "not-used" };
+  }
+  if (loaderState.status === "disabled") nativeStats.disabledFallbacks++;
   const binding = loadNativeBinding();
   if (!binding) return { status: "not-used" };
   try {
@@ -176,15 +219,20 @@ function tryNativePlan(
       mode === "preview"
         ? binding.planAsciiEdits(contentBytes, edits)
         : binding.prepareAsciiExecution(contentBytes, edits);
-    if (!nativePlan) return { status: "declined" };
+    if (!nativePlan) {
+      nativeStats.nativeDeclines++;
+      return { status: "declined" };
+    }
     if (
       (mode === "preview" && nativePlan.suffixBytes !== undefined) ||
       (mode === "execution" && nativePlan.suffixWrite !== undefined && nativePlan.suffixBytes === undefined)
     ) {
       throw new Error("Native planner returned an invalid suffix contract");
     }
+    nativeStats.nativeHits++;
     return { status: "planned", plan: convertNativePlan(nativePlan, rawOffset) };
   } catch {
+    nativeStats.invocationFailures++;
     loaderState = { status: "disabled" };
     return { status: "not-used" };
   }
@@ -212,6 +260,7 @@ export function tryNativeAsciiSuffix(
   position: number,
   replacementIndex: number,
 ): Buffer | undefined {
+  if (loaderState.status === "disabled") nativeStats.disabledFallbacks++;
   const binding = loadNativeBinding();
   if (!binding) return undefined;
   try {
@@ -227,12 +276,42 @@ export function tryNativeAsciiSuffix(
       position,
       replacementIndex,
     );
-    if (!suffix) loaderState = { status: "disabled" };
+    if (!suffix) {
+      nativeStats.invocationFailures++;
+      loaderState = { status: "disabled" };
+      return undefined;
+    }
+    nativeStats.nativeHits++;
     return suffix;
   } catch {
+    nativeStats.invocationFailures++;
     loaderState = { status: "disabled" };
     return undefined;
   }
+}
+
+export function recordNativeTypeScriptFallback(): void {
+  nativeStats.typeScriptFallbacks++;
+}
+
+export function getNativeBackendStats(): NativeBackendStatsSnapshot {
+  return { ...nativeStats };
+}
+
+export function resetNativeBackendStats(): void {
+  nativeStats = emptyNativeBackendStats();
+}
+
+export function formatNativeBackendStats(snapshot: NativeBackendStatsSnapshot): string {
+  return [
+    `Native hits: ${snapshot.nativeHits}`,
+    `Native unsupported inputs: ${snapshot.unsupportedInputs}`,
+    `Native declines: ${snapshot.nativeDeclines}`,
+    `Native load failures: ${snapshot.loadFailures}`,
+    `Native invocation failures: ${snapshot.invocationFailures}`,
+    `Native disabled fallbacks: ${snapshot.disabledFallbacks}`,
+    `TypeScript accelerator fallbacks: ${snapshot.typeScriptFallbacks}`,
+  ].join("\n");
 }
 
 export function getNativePlannerStatus(): "uninitialized" | "loaded" | "disabled" {
@@ -241,4 +320,5 @@ export function getNativePlannerStatus(): "uninitialized" | "loaded" | "disabled
 
 export function resetNativePlannerForTests(): void {
   loaderState = { status: "uninitialized" };
+  resetNativeBackendStats();
 }

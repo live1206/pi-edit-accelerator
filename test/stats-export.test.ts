@@ -24,6 +24,16 @@ const snapshot: EditAcceleratorStatsSnapshot = {
   acceleratedPercent: 200 / 3,
 };
 
+const nativeBackend = {
+  nativeHits: 2,
+  unsupportedInputs: 1,
+  nativeDeclines: 0,
+  loadFailures: 0,
+  invocationFailures: 0,
+  disabledFallbacks: 0,
+  typeScriptFallbacks: 1,
+};
+
 afterEach(async () => {
   await Promise.all(tempDirectories.splice(0).map((path) => rm(path, { recursive: true, force: true })));
 });
@@ -37,6 +47,7 @@ describe("edit accelerator statistics export", () => {
       "process-session-id",
       "snapshot-interval-id",
       snapshot,
+      nativeBackend,
       new Date("2026-09-20T08:00:00.000Z"),
     );
     const exported = JSON.parse(await readFile(outputPath, "utf8")) as EditAcceleratorStatsExport;
@@ -47,6 +58,7 @@ describe("edit accelerator statistics export", () => {
       snapshotIntervalId: "snapshot-interval-id",
       collectedAt: "2026-09-20T08:00:00.000Z",
       statistics: snapshot,
+      nativeBackend,
     });
     const serialized = JSON.stringify(exported);
     expect(serialized).not.toContain(directory);
@@ -57,15 +69,15 @@ describe("edit accelerator statistics export", () => {
 
   it("requires an output directory and never overwrites a snapshot", async () => {
     await expect(
-      exportEditAcceleratorStats(" ", "process", "interval", snapshot),
+      exportEditAcceleratorStats(" ", "process", "interval", snapshot, nativeBackend),
     ).rejects.toThrow("Usage:");
 
     const directory = await mkdtemp(join(tmpdir(), "pi-edit-stats-export-"));
     tempDirectories.push(directory);
     const collectedAt = new Date("2026-09-20T08:00:00.000Z");
-    await exportEditAcceleratorStats(directory, "process", "interval", snapshot, collectedAt);
+    await exportEditAcceleratorStats(directory, "process", "interval", snapshot, nativeBackend, collectedAt);
     await expect(
-      exportEditAcceleratorStats(directory, "process", "interval", snapshot, collectedAt),
+      exportEditAcceleratorStats(directory, "process", "interval", snapshot, nativeBackend, collectedAt),
     ).rejects.toMatchObject({ code: "EEXIST" });
   });
 });

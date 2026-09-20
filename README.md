@@ -107,7 +107,7 @@ Use these process-local commands during a session:
 /edit-accelerator-reset-stats
 ```
 
-Statistics include aggregate edit outcomes, optimization counts, fast-path percentage, and eligible-file size buckets (`<100 KB`, `100 KB-1 MB`, `1-5 MB`, and `>5 MB`). Export writes a timestamped JSON snapshot with random process-session and snapshot-interval identifiers. No paths, arguments, replacement text, file contents, or exact file sizes are retained. Export once before each pilot process exits; reset starts a new interval within the same process session.
+Statistics include aggregate edit outcomes, optimization counts, fast-path percentage, eligible-file size buckets (`<100 KB`, `100 KB-1 MB`, `1-5 MB`, and `>5 MB`), and native hit, decline, load-failure, invocation-failure, disabled-fallback, and TypeScript-fallback counts. Export writes a timestamped JSON snapshot with random process-session and snapshot-interval identifiers. No paths, arguments, replacement text, file contents, or exact file sizes are retained. Export once before each pilot process exits; reset starts a new interval within the same process session.
 
 ## Other edit overrides
 
@@ -133,11 +133,14 @@ npm run check
 npm test
 ```
 
-On Linux x64 with Rust installed, build and validate the optional Phase 1 native planner:
+On Linux x64 with Rust installed, build and validate the optional native backend:
 
 ```sh
 npm run native:test
+npm run native:package:linux-x64
 ```
+
+The package command creates a platform-package tarball under `.artifacts/`. Generated native binaries and tarballs are not committed.
 
 Benchmarks:
 
@@ -149,6 +152,7 @@ npm run bench:positional-write
 npm run bench:prefetch
 npm run bench:suffix-write
 npm run bench:group-scaling
+npm run bench:resources -- --mode preview --strategy suffix --runs 20 --size-bytes 6000000
 npm run profile -- --mode execution --output .artifacts/execution.cpuprofile --report .artifacts/execution-profile.json
 npm run profile:analyze -- .artifacts/execution.cpuprofile --output .artifacts/execution-analysis.json
 ```

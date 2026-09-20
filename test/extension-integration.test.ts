@@ -402,7 +402,17 @@ describe("edit accelerator extension", () => {
     const populated = snapshots.find((snapshot) => snapshot.statistics.totalCalls === 1);
     const reset = snapshots.find((snapshot) => snapshot.statistics.totalCalls === 0);
     expect(populated.statistics.eligibleFileSizes.lessThan100Kb).toBe(1);
+    expect(populated.nativeBackend.nativeHits).toBeGreaterThanOrEqual(0);
     expect(reset.statistics.eligibleFileSizes.lessThan100Kb).toBe(0);
+    expect(reset.nativeBackend).toEqual({
+      nativeHits: 0,
+      unsupportedInputs: 0,
+      nativeDeclines: 0,
+      loadFailures: 0,
+      invocationFailures: 0,
+      disabledFallbacks: 0,
+      typeScriptFallbacks: 0,
+    });
     expect(JSON.stringify(snapshots)).not.toContain(directory);
     expect(notifications.every(({ level }) => level === "info")).toBe(true);
   });

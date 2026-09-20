@@ -109,6 +109,7 @@ They report or export only:
 - positional writes
 - suffix writes
 - eligible-file size buckets (`<100 KB`, `100 KB-1 MB`, `1-5 MB`, and `>5 MB`)
+- native hits, declines, load and invocation failures, disabled fallbacks, and TypeScript fallbacks
 - fast-path percentage
 
 JSON exports also contain random process-session and snapshot-interval identifiers plus the collection timestamp. No paths, arguments, old text, replacement text, file contents, or exact file sizes are retained. Export once before each pilot process exits; reset starts a new interval within the same process session.

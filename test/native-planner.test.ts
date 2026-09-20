@@ -10,6 +10,7 @@ import {
   tryPrepareExactEdit,
 } from "../src/exact-edit.ts";
 import {
+  getNativeBackendStats,
   getNativePlannerStatus,
   resetNativePlannerForTests,
   tryNativeAsciiExecutionPlan,
@@ -68,6 +69,7 @@ describe.skipIf(!nativeAvailable)("native ASCII planner", () => {
     expect(attempt.plan.diffWindows?.[0]?.oldBytes.toString("utf8")).toBe("first\nmiddle\nlast\n");
     expect(attempt.plan.diffWindows?.[0]?.newBytes.toString("utf8")).toBe("FIRST\nmiddle\nLAST\n");
     expect(getNativePlannerStatus()).toBe("loaded");
+    expect(getNativeBackendStats().nativeHits).toBe(1);
   });
 
   it("returns suffix metadata without assembling output", () => {
@@ -109,6 +111,7 @@ describe.skipIf(!nativeAvailable)("native ASCII planner", () => {
       ),
     ).toEqual({ status: "not-used" });
     expect(getNativePlannerStatus()).toBe("uninitialized");
+    expect(getNativeBackendStats().unsupportedInputs).toBe(1);
   });
 
   it("assembles suffixes only for execution", () => {
@@ -228,7 +231,9 @@ describe.skipIf(!nativeAvailable)("native ASCII planner", () => {
 
     expect(tryNativeAsciiPlan(Buffer.from("before\n"), input)).toEqual({ status: "not-used" });
     expect(getNativePlannerStatus()).toBe("disabled");
+    expect(getNativeBackendStats().loadFailures).toBe(1);
     process.env.PI_EDIT_ACCELERATOR_NATIVE_PATH = nativePath;
     expect(tryNativeAsciiPlan(Buffer.from("before\n"), input)).toEqual({ status: "not-used" });
+    expect(getNativeBackendStats().disabledFallbacks).toBe(1);
   });
 });

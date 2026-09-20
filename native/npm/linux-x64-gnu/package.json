@@ -1,0 +1,30 @@
+{
+  "name": "@live1206/pi-edit-accelerator-linux-x64-gnu",
+  "version": "0.1.5",
+  "description": "Linux x64 native backend for @live1206/pi-edit-accelerator",
+  "license": "MIT",
+  "author": "Wei Hu",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/live1206/pi-edit-accelerator.git",
+    "directory": "native/npm/linux-x64-gnu"
+  },
+  "main": "pi-edit-accelerator-native.linux-x64-gnu.node",
+  "files": [
+    "pi-edit-accelerator-native.linux-x64-gnu.node",
+    "README.md",
+    "LICENSE"
+  ],
+  "os": [
+    "linux"
+  ],
+  "cpu": [
+    "x64"
+  ],
+  "libc": [
+    "glibc"
+  ],
+  "engines": {
+    "node": ">=22.19.0"
+  }
+}
