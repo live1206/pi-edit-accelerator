@@ -36,8 +36,14 @@ interface PrefetchPromise extends ExpiringPromise<PrefetchedExactEditFile> {
 export default function editAccelerator(pi: ExtensionAPI): void {
   const builtInEdit = createEditToolDefinition(process.cwd());
   const stats = createEditAcceleratorStats();
-  const processSessionId = randomUUID();
+  resetNativeBackendStats();
+  const processIdKey = Symbol.for("@live1206/pi-edit-accelerator/process-session-id");
+  const processGlobal = globalThis as typeof globalThis & { [key: symbol]: string | undefined };
+  const processSessionId = processGlobal[processIdKey] ?? randomUUID();
+  processGlobal[processIdKey] = processSessionId;
+  const pilotDirectory = process.env.PI_EDIT_ACCELERATOR_PILOT_DIR?.trim();
   let snapshotIntervalId = randomUUID();
+  let intervalExported = false;
   const previewStates = new WeakMap<object, { argsKey: string; pending: boolean; fallback: boolean }>();
   let prefetchedFile: PrefetchPromise | undefined;
   let preparedPreview: ExpiringPromise<PreparedExactEdit> | undefined;
@@ -192,6 +198,7 @@ export default function editAccelerator(pi: ExtensionAPI): void {
           stats.snapshot(),
           getNativeBackendStats(),
         );
+        intervalExported = true;
         ctx.ui.notify(`Edit accelerator statistics exported to ${outputPath}`, "info");
       } catch (error) {
         ctx.ui.notify(error instanceof Error ? error.message : String(error), "error");
@@ -205,7 +212,26 @@ export default function editAccelerator(pi: ExtensionAPI): void {
       stats.reset();
       resetNativeBackendStats();
       snapshotIntervalId = randomUUID();
+      intervalExported = false;
       ctx.ui.notify("Edit accelerator statistics reset.", "info");
     },
   });
+
+  if (pilotDirectory) {
+    pi.on("session_shutdown", async () => {
+      if (intervalExported || stats.snapshot().totalCalls === 0) return;
+      try {
+        await exportEditAcceleratorStats(
+          pilotDirectory,
+          processSessionId,
+          snapshotIntervalId,
+          stats.snapshot(),
+          getNativeBackendStats(),
+        );
+        intervalExported = true;
+      } catch (error) {
+        console.error("Failed to export edit accelerator pilot statistics:", error);
+      }
+    });
+  }
 }

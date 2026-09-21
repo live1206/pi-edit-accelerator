@@ -36,6 +36,8 @@ jobs:
       - run: cargo fmt --manifest-path native/Cargo.toml -- --check
       - run: cargo clippy --manifest-path native/Cargo.toml --all-targets -- -D warnings
       - run: npm run native:test
+      - run: rustup toolchain install nightly-2026-09-21 --profile minimal --component rust-src
+      - run: npm run native:test:asan
       - run: npm run native:package:linux-x64
       - uses: actions/upload-artifact@v4
         with:

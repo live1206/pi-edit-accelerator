@@ -2,11 +2,11 @@
 
 ## Status
 
-Phase 0 validation infrastructure is in progress. The TypeScript baseline and lifecycle matrix are now runnable before a native backend exists. The baseline below uses 20 measured runs per case and is suitable for comparison with the first native candidate; adoption still requires the resource measurements, pilot, and cross-platform gates in the implementation plan.
+The Linux x64 Node 22 prototype has completed correctness, lifecycle-performance, startup, peak-RSS, GC, cumulative-allocation, sanitizer, and package-construction validation. Initial adoption remains blocked only on the 100–200-call multi-process pilot. macOS, Windows, and Bun are deferred because the current deployment target is Linux/WSL; they are required only if those targets are added later.
 
-Environment and revision:
+Environment:
 
-- revision: `5494a428fd07a03985e3061d2ee559539a7b007b` plus the Phase 0 working-tree changes;
+- `rust-hybrid-validation` prototype branch;
 - Node 22.23.2;
 - Linux x64 under WSL2;
 - AMD EPYC 7763.
@@ -122,13 +122,33 @@ A new `bench:resources` harness measures lazy cold-operation latency, extension 
 - extension registration changed by at most 0.18 ms, within the 1 ms startup ceiling;
 - the first native operation remained faster than TypeScript despite lazy addon loading.
 
-Net array-buffer deltas are not a valid cumulative allocation-byte metric: native execution intentionally returns an output buffer whose collection can occur after the measured operation. The allocation-byte gate therefore remains open pending an allocation profiler that includes external/native buffers. Raw resource reports are in `.artifacts/native-phase4-resources-20260920/`.
+Net array-buffer deltas alone are not a valid cumulative allocation metric because collection can occur after the measured operation. The follow-up Linux profiler combines V8 allocation sampling with a glibc allocation interposer. Marker writes delimit each operation, so the result includes cumulative JavaScript heap allocation plus native and external-buffer allocation without including process startup.
+
+Twenty-run allocation results passed the 10% ceiling in all eight large-file preview/fresh-execution cases:
+
+| Bucket | Strategy | Preview | Execution |
+|---|---|---:|---:|
+| approximately 3 MB | positional | 50.5% lower | 49.4% lower |
+| approximately 3 MB | suffix | 49.8% lower | 11.1% lower |
+| approximately 6 MB | positional | 39.8% lower | 45.3% lower |
+| approximately 6 MB | suffix | 38.3% lower | 2.2% lower |
+
+Raw resource reports are in `.artifacts/native-phase4-resources-20260920/`; the cumulative-allocation report is `.artifacts/native-phase4-allocations-20260921.json`.
+
+## Phase 5 correctness hardening
+
+The native-loaded suite now includes 1,000 seeded randomized ASCII differential cases. Each case compares preview planning and fresh native execution with the TypeScript oracle, including variable file shape, edit position, deletion, length-preserving and length-changing replacements, multiline insertion, and trailing-newline state. The existing deterministic suite continues to cover multi-edit, ambiguity, BOM, Unicode/surrogate fallback, file identity, and integration behavior.
+
+Rust unit tests also pass under AddressSanitizer using pinned nightly `2026-09-21`. CI runs this sanitizer check after the ordinary native-loaded suite.
+
+Native pilot counters now distinguish planning attempts from successful plans, allowing the pilot to enforce the 95% acceptance gate without double-counting suffix assembly. `npm run pilot:start -- [working-directory]` builds and explicitly loads the development binary and automatically exports each nonempty shutdown interval. `npm run pilot:summary -- <snapshot paths>` rejects duplicate intervals and reports the multi-process, call-count, acceptance, and native-failure gates.
 
 ## Remaining validation work
 
-Before adoption:
+Before Linux/WSL adoption:
 
-1. Run and export the 100–200-call privacy-safe pilot across multiple Pi processes.
-2. Add a cumulative allocation profiler that accounts for external/native buffers.
-3. Validate Node and Bun on the intended macOS and Windows targets and add their platform packages before broad rollout.
-4. Publish the Linux platform package and add it as an optional dependency only after the pilot and remaining gates pass.
+1. Run and export the 100–200-call privacy-safe pilot across at least two Pi processes.
+2. Aggregate it with `npm run pilot:summary -- <snapshot paths>` and confirm every gate passes.
+3. Publish the Linux platform package and add it as an optional dependency only after the pilot passes.
+
+macOS, Windows, and Bun validation is deferred unless those platforms become intended native targets.

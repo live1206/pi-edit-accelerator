@@ -1,8 +1,10 @@
 import { strictEqual } from "node:assert/strict";
+import { writeSync } from "node:fs";
 import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { performance, PerformanceObserver } from "node:perf_hooks";
+import { Session } from "node:inspector";
 import type {
   EditToolInput,
   ExtensionAPI,
@@ -17,6 +19,7 @@ interface Options {
   strategy: Strategy;
   runs: number;
   targetBytes: number;
+  allocationMarkers: boolean;
 }
 
 interface Sample {
@@ -27,6 +30,7 @@ interface Sample {
   arrayBuffersDeltaBytes: number;
   gcPauseMs: number;
   majorGcCount: number;
+  sampledHeapAllocatedBytes: number;
 }
 
 function positiveInteger(value: string | undefined, flag: string): number {
@@ -36,7 +40,13 @@ function positiveInteger(value: string | undefined, flag: string): number {
 }
 
 function parseArgs(args: string[]): Options {
-  const options: Options = { mode: "preview", strategy: "suffix", runs: 20, targetBytes: 5_242_900 };
+  const options: Options = {
+    mode: "preview",
+    strategy: "suffix",
+    runs: 20,
+    targetBytes: 5_242_900,
+    allocationMarkers: false,
+  };
   for (let index = 0; index < args.length; index++) {
     const arg = args[index];
     if (arg === "--mode") {
@@ -49,6 +59,7 @@ function parseArgs(args: string[]): Options {
       options.strategy = value;
     } else if (arg === "--runs") options.runs = positiveInteger(args[++index], arg);
     else if (arg === "--size-bytes") options.targetBytes = positiveInteger(args[++index], arg);
+    else if (arg === "--allocation-markers") options.allocationMarkers = true;
     else throw new Error(`Unknown option: ${arg}`);
   }
   return options;
@@ -138,7 +149,28 @@ async function operate(directory: string): Promise<void> {
   });
 }
 
-async function sample(): Promise<Sample> {
+const allocationResetMarker = "__PI_EDIT_ALLOC_RESET__\n";
+const allocationSampleMarker = "__PI_EDIT_ALLOC_SAMPLE__\n";
+const inspector = new Session();
+if (options.allocationMarkers) inspector.connect();
+
+function inspectorPost(method: string, params?: Record<string, unknown>): Promise<Record<string, any>> {
+  return new Promise((resolvePost, rejectPost) => {
+    inspector.post(method, params ?? {}, (error, result) => {
+      if (error) rejectPost(error);
+      else resolvePost(result as Record<string, any>);
+    });
+  });
+}
+
+function sampledHeapBytes(node: { selfSize?: number; children?: Array<any> }): number {
+  return (node.selfSize ?? 0) + (node.children ?? []).reduce(
+    (total, child) => total + sampledHeapBytes(child),
+    0,
+  );
+}
+
+async function sample(recordAllocation = false): Promise<Sample> {
   const directory = await mkdtemp(join(tmpdir(), "pi-edit-resources-"));
   try {
     await writeFile(join(directory, input.path), fixture, "utf8");
@@ -157,9 +189,24 @@ async function sample(): Promise<Sample> {
     const sampler = setInterval(() => {
       peakRss = Math.max(peakRss, process.memoryUsage().rss);
     }, 1);
+    if (recordAllocation) {
+      await inspectorPost("HeapProfiler.startSampling", {
+        samplingInterval: 1024,
+        includeObjectsCollectedByMajorGC: true,
+        includeObjectsCollectedByMinorGC: true,
+      });
+      writeSync(2, allocationResetMarker);
+    }
     const startedAt = performance.now();
     await operate(directory);
     const wallTimeMs = performance.now() - startedAt;
+    if (recordAllocation) writeSync(2, allocationSampleMarker);
+    const heapProfile = recordAllocation
+      ? await inspectorPost("HeapProfiler.stopSampling")
+      : undefined;
+    const sampledHeapAllocatedBytes = heapProfile
+      ? sampledHeapBytes(heapProfile.profile.head)
+      : 0;
     clearInterval(sampler);
     peakRss = Math.max(peakRss, process.memoryUsage().rss);
     await new Promise<void>((resolveTick) => setImmediate(resolveTick));
@@ -173,6 +220,7 @@ async function sample(): Promise<Sample> {
       arrayBuffersDeltaBytes: after.arrayBuffers - before.arrayBuffers,
       gcPauseMs: gcEvents.reduce((total, event) => total + event.duration, 0),
       majorGcCount: gcEvents.filter((event) => event.kind === 4).length,
+      sampledHeapAllocatedBytes,
     };
   } finally {
     await rm(directory, { recursive: true, force: true });
@@ -182,7 +230,7 @@ async function sample(): Promise<Sample> {
 const cold = await sample();
 await sample();
 const samples: Sample[] = [];
-for (let index = 0; index < options.runs; index++) samples.push(await sample());
+for (let index = 0; index < options.runs; index++) samples.push(await sample(options.allocationMarkers));
 
 const fields = [
   "wallTimeMs",
@@ -192,6 +240,7 @@ const fields = [
   "arrayBuffersDeltaBytes",
   "gcPauseMs",
   "majorGcCount",
+  "sampledHeapAllocatedBytes",
 ] as const;
 const metrics = Object.fromEntries(fields.map((field) => [field, summarize(samples.map((sample) => sample[field]))]));
 process.stdout.write(
@@ -210,6 +259,9 @@ process.stdout.write(
       registrationMs,
       cold,
       metrics,
+      allocationSamples: options.allocationMarkers
+        ? samples.map(({ sampledHeapAllocatedBytes }) => ({ sampledHeapAllocatedBytes }))
+        : undefined,
     },
     null,
     2,

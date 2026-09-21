@@ -221,6 +221,71 @@ describe.skipIf(!nativeAvailable)("native ASCII planner", () => {
     }
   });
 
+  it("matches the TypeScript oracle across seeded randomized ASCII edits", () => {
+    process.env.PI_EDIT_ACCELERATOR_NATIVE_PATH = nativePath;
+    resetNativePlannerForTests();
+    let state = 0x6d2b79f5;
+    const random = (limit: number): number => {
+      state ^= state << 13;
+      state ^= state >>> 17;
+      state ^= state << 5;
+      return (state >>> 0) % limit;
+    };
+    const randomText = (length: number): string =>
+      Array.from({ length }, () => String.fromCharCode(33 + random(90))).join("");
+
+    for (let caseIndex = 0; caseIndex < 1_000; caseIndex++) {
+      const lineCount = 1 + random(40);
+      const lines = Array.from(
+        { length: lineCount },
+        (_, line) => `case_${caseIndex}_line_${line}_${randomText(1 + random(24))}`,
+      );
+      const endsWithNewline = random(2) === 0;
+      const content = `${lines.join("\n")}${endsWithNewline ? "\n" : ""}`;
+      const selectedLine = random(lines.length);
+      const oldText = lines[selectedLine]!;
+      let newText = randomText(random(40));
+      if (random(3) === 0) newText += `\ninserted_${caseIndex}_${randomText(random(20))}`;
+      if (newText === oldText) newText += "!";
+      const input: EditToolInput = {
+        path: "fixture.txt",
+        edits: [{ oldText, newText }],
+      };
+      const expected = tryApplyExactEdits(content, input);
+      expect(expected).toBeDefined();
+
+      const preview = tryNativeAsciiPlan(Buffer.from(content), input);
+      expect(preview.status, `preview case ${caseIndex}`).toBe("planned");
+      if (preview.status !== "planned") continue;
+      let previewOutput = content;
+      for (const replacement of [...preview.plan.replacements].reverse()) {
+        previewOutput =
+          previewOutput.slice(0, replacement.matchIndex) +
+          replacement.newText +
+          previewOutput.slice(replacement.matchIndex + replacement.matchLength);
+      }
+      expect(previewOutput, `preview output case ${caseIndex}`).toBe(expected);
+
+      const execution = tryNativeAsciiExecutionPlan(Buffer.from(content), input);
+      expect(execution.status, `execution case ${caseIndex}`).toBe("planned");
+      if (execution.status !== "planned") continue;
+      const output = Buffer.from(content);
+      let executionOutput: Buffer;
+      if (execution.plan.positionalWrites) {
+        for (const write of execution.plan.positionalWrites) write.bytes.copy(output, write.position);
+        executionOutput = output;
+      } else {
+        expect(execution.plan.suffixWrite).toBeDefined();
+        expect(execution.plan.suffixBytes).toBeDefined();
+        executionOutput = Buffer.concat([
+          output.subarray(0, execution.plan.suffixWrite!.contentOffset),
+          execution.plan.suffixBytes!,
+        ]);
+      }
+      expect(executionOutput.toString("utf8"), `execution output case ${caseIndex}`).toBe(expected);
+    }
+  });
+
   it("caches a native load failure as disabled", () => {
     process.env.PI_EDIT_ACCELERATOR_NATIVE_PATH = resolve("native/missing.node");
     resetNativePlannerForTests();

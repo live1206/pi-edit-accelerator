@@ -69,6 +69,8 @@ export type NativePlanningAttempt =
 
 export interface NativeBackendStatsSnapshot {
   nativeHits: number;
+  planningAttempts: number;
+  plannedCalls: number;
   unsupportedInputs: number;
   nativeDeclines: number;
   loadFailures: number;
@@ -89,6 +91,8 @@ const require = createRequire(import.meta.url);
 function emptyNativeBackendStats(): NativeBackendStatsSnapshot {
   return {
     nativeHits: 0,
+    planningAttempts: 0,
+    plannedCalls: 0,
     unsupportedInputs: 0,
     nativeDeclines: 0,
     loadFailures: 0,
@@ -215,6 +219,7 @@ function tryNativePlan(
   const binding = loadNativeBinding();
   if (!binding) return { status: "not-used" };
   try {
+    nativeStats.planningAttempts++;
     const nativePlan =
       mode === "preview"
         ? binding.planAsciiEdits(contentBytes, edits)
@@ -230,6 +235,7 @@ function tryNativePlan(
       throw new Error("Native planner returned an invalid suffix contract");
     }
     nativeStats.nativeHits++;
+    nativeStats.plannedCalls++;
     return { status: "planned", plan: convertNativePlan(nativePlan, rawOffset) };
   } catch {
     nativeStats.invocationFailures++;
@@ -304,7 +310,9 @@ export function resetNativeBackendStats(): void {
 
 export function formatNativeBackendStats(snapshot: NativeBackendStatsSnapshot): string {
   return [
-    `Native hits: ${snapshot.nativeHits}`,
+    `Native operations: ${snapshot.nativeHits}`,
+    `Native planning attempts: ${snapshot.planningAttempts}`,
+    `Native planned calls: ${snapshot.plannedCalls}`,
     `Native unsupported inputs: ${snapshot.unsupportedInputs}`,
     `Native declines: ${snapshot.nativeDeclines}`,
     `Native load failures: ${snapshot.loadFailures}`,

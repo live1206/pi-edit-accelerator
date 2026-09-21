@@ -107,7 +107,13 @@ Use these process-local commands during a session:
 /edit-accelerator-reset-stats
 ```
 
-Statistics include aggregate edit outcomes, optimization counts, fast-path percentage, eligible-file size buckets (`<100 KB`, `100 KB-1 MB`, `1-5 MB`, and `>5 MB`), and native hit, decline, load-failure, invocation-failure, disabled-fallback, and TypeScript-fallback counts. Export writes a timestamped JSON snapshot with random process-session and snapshot-interval identifiers. No paths, arguments, replacement text, file contents, or exact file sizes are retained. Export once before each pilot process exits; reset starts a new interval within the same process session.
+Statistics include aggregate edit outcomes, optimization counts, fast-path percentage, eligible-file size buckets (`<100 KB`, `100 KB-1 MB`, `1-5 MB`, and `>5 MB`), and native planning, acceptance, decline, failure, and TypeScript-fallback counts. Export writes a timestamped JSON snapshot with random process-session and snapshot-interval identifiers. No paths, arguments, replacement text, file contents, or exact file sizes are retained.
+
+Start a pilot process from this checkout with `npm run pilot:start -- [working-directory]`. This builds and explicitly loads the native extension, then writes privacy-safe snapshots to `.artifacts/native-pilot` (override with `PI_EDIT_ACCELERATOR_PILOT_DIR`). A nonempty interval is exported automatically during session shutdown; manual export remains available. After collecting at least 100 calls across two Pi processes, run:
+
+```sh
+npm run pilot:summary -- .artifacts/native-pilot
+```
 
 ## Other edit overrides
 
@@ -174,11 +180,12 @@ See [docs/rust-hybrid-implementation-plan.md](docs/rust-hybrid-implementation-pl
 
 ## Roadmap
 
-1. Complete the privacy-safe 100–200-call pilot.
-2. Prototype buffer-first native preview preparation.
-3. Add startup, memory, allocation, and GC measurements.
-4. Add permission, symlink, abort, concurrency, malformed-preview, and cross-platform tests.
-5. Validate Linux, macOS, Windows, Node, and Bun before broad rollout.
+The Linux x64 Node 22 POC has completed native preview/execution, deterministic and seeded differential correctness tests, lifecycle benchmarks, startup, memory, cumulative-allocation, GC, sanitizer, and package-construction validation. Next:
+
+1. Complete the privacy-safe 100–200-call pilot across at least two Pi processes.
+2. Aggregate snapshots with `npm run pilot:summary -- <snapshot paths>`.
+3. Publish and enable the optional Linux x64 package only if the pilot gates pass.
+4. Validate other operating systems and runtimes only if they become intended native targets.
 
 ## License
 

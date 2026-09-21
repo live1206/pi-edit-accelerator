@@ -283,7 +283,9 @@ Report median, p95, minimum, maximum, allocated bytes, peak RSS, GC pause time, 
 
 ### Runtime and platform policy
 
-Use the following initial matrix:
+The current adoption target is Node 22 on Linux x64 under Linux/WSL. macOS, Windows, and Bun remain deferred compatibility targets and do not block Linux-only adoption; validate them before adding them to the native allowlist.
+
+Use the following target matrix:
 
 | Runtime and target | Initial policy | Required size coverage |
 |---|---|---|

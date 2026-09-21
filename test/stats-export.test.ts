@@ -26,6 +26,8 @@ const snapshot: EditAcceleratorStatsSnapshot = {
 
 const nativeBackend = {
   nativeHits: 2,
+  planningAttempts: 2,
+  plannedCalls: 2,
   unsupportedInputs: 1,
   nativeDeclines: 0,
   loadFailures: 0,

@@ -13,9 +13,12 @@ import { afterEach, describe, expect, it } from "vitest";
 import editAccelerator from "../extensions/edit-accelerator.ts";
 
 const tempDirectories: string[] = [];
+const originalPilotDirectory = process.env.PI_EDIT_ACCELERATOR_PILOT_DIR;
 
 afterEach(async () => {
   await Promise.all(tempDirectories.splice(0).map((path) => rm(path, { recursive: true, force: true })));
+  if (originalPilotDirectory === undefined) delete process.env.PI_EDIT_ACCELERATOR_PILOT_DIR;
+  else process.env.PI_EDIT_ACCELERATOR_PILOT_DIR = originalPilotDirectory;
 });
 
 async function createDirectory(): Promise<string> {
@@ -406,6 +409,8 @@ describe("edit accelerator extension", () => {
     expect(reset.statistics.eligibleFileSizes.lessThan100Kb).toBe(0);
     expect(reset.nativeBackend).toEqual({
       nativeHits: 0,
+      planningAttempts: 0,
+      plannedCalls: 0,
       unsupportedInputs: 0,
       nativeDeclines: 0,
       loadFailures: 0,
@@ -415,6 +420,37 @@ describe("edit accelerator extension", () => {
     });
     expect(JSON.stringify(snapshots)).not.toContain(directory);
     expect(notifications.every(({ level }) => level === "info")).toBe(true);
+  });
+
+  it("automatically exports an opted-in pilot interval on shutdown", async () => {
+    const directory = await createDirectory();
+    const pilotDirectory = join(directory, "pilot");
+    process.env.PI_EDIT_ACCELERATOR_PILOT_DIR = pilotDirectory;
+    let tool: ReturnType<typeof createEditToolDefinition> | undefined;
+    let shutdown: (() => Promise<void>) | undefined;
+    editAccelerator({
+      registerTool(registered: unknown) {
+        tool = registered as ReturnType<typeof createEditToolDefinition>;
+      },
+      registerCommand() {},
+      on(event: string, handler: () => Promise<void>) {
+        if (event === "session_shutdown") shutdown = handler;
+      },
+    } as unknown as ExtensionAPI);
+    await writeFile(join(directory, "fixture.txt"), "before\n", "utf8");
+    await execute(tool!, directory, {
+      path: "fixture.txt",
+      edits: [{ oldText: "before", newText: "after" }],
+    });
+
+    await shutdown!();
+
+    const files = await readdir(pilotDirectory);
+    expect(files).toHaveLength(1);
+    const snapshot = JSON.parse(await readFile(join(pilotDirectory, files[0]!), "utf8"));
+    expect(snapshot.statistics.totalCalls).toBe(1);
+    expect(snapshot.processSessionId).toBeTypeOf("string");
+    expect(snapshot.snapshotIntervalId).toBeTypeOf("string");
   });
 
   it("registers one edit override with the built-in contract", () => {
