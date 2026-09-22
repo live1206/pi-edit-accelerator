@@ -2,7 +2,7 @@
 
 ## Status
 
-The Linux x64 Node 22 prototype has completed correctness, lifecycle-performance, startup, peak-RSS, GC, cumulative-allocation, sanitizer, and package-construction validation. Initial adoption remains blocked only on the 100–200-call multi-process pilot. macOS, Windows, and Bun are deferred because the current deployment target is Linux/WSL; they are required only if those targets are added later.
+The Linux x64 Node 22 prototype has completed correctness, lifecycle-performance, startup, peak-RSS, GC, cumulative-allocation, sanitizer, package-construction, and normal-source-size validation. A daily-work pilot reached 58 calls across four processes with no native failures, but 40 of 44 eligible files were below 100 KB and none exceeded 1 MB. The small-file remeasurement does not support native rollout for that workload: the TypeScript accelerator helps ordinary edits, while Rust adds a meaningful improvement only to fresh execution in the 50–100 KB bucket. macOS, Windows, and Bun remain deferred.
 
 Environment:
 
@@ -47,6 +47,26 @@ The fixtures were approximately 50 KB, 500 KB, 3 MB, and 6 MB. Each row used 20 
 - Suffix assembly remains material after preview reuse on large files, supporting deferred native `assembleAsciiSuffix` investigation.
 - Preview and fresh execution continue to scale with file size and remain the primary native-kernel targets.
 - Small-file native routing must be measured carefully because the current TypeScript path is already around 2–4 ms.
+
+## Normal source-size remeasurement
+
+`npm run bench:small-files` compares Pi's built-in edit, the TypeScript accelerator, and the Rust accelerator on ASCII TypeScript-shaped fixtures in four sub-100 KB buckets. It covers one length-changing edit, three length-preserving edits, and three length-changing edits across preview, fresh execution, and execution after a completed preview. Three process-order rotations collected 150 measured samples per case after warmup. Every execution verified final file content; native counters confirmed that all 6,480 Rust planning attempts used native plans without failures.
+
+The following values are milliseconds, averaged across the three edit scenarios for a compact view of their individual medians:
+
+| Size | Preview built-in / TS / Rust | Fresh built-in / TS / Rust | Reused built-in / TS / Rust |
+|---|---:|---:|---:|
+| approximately 5 KB | 0.883 / 1.149 / 1.130 | 1.779 / 1.743 / 1.791 | 1.727 / 1.288 / 1.316 |
+| approximately 18 KB | 1.109 / 1.090 / 1.087 | 2.135 / 1.806 / 1.778 | 2.114 / 1.274 / 1.326 |
+| approximately 38 KB | 1.409 / 1.054 / 1.042 | 2.755 / 1.820 / 1.803 | 2.657 / 1.301 / 1.337 |
+| approximately 75 KB | 2.023 / 1.077 / 1.116 | 4.234 / 2.524 / 1.885 | 4.293 / 1.329 / 1.380 |
+
+This answers the two adoption questions separately:
+
+1. **The TypeScript accelerator improves ordinary editing.** Preview reuse was 25.4–68.8% faster in every bucket. Fresh execution was effectively flat at 5 KB, then 15.4–40.0% faster from 18–75 KB. Preview was 25.1–46.0% faster at 38–75 KB, flat at 18 KB, and 0.266 ms slower at 5 KB.
+2. **Rust does not add enough value for the observed workload.** Against TypeScript, preview and reused execution differed by at most 0.053 ms in every bucket and Rust was usually slower on reused execution. Fresh Rust execution was also effectively flat through 38 KB. At 75 KB it was consistently 0.639 ms (25.3%) faster, with p95 0.545 ms lower, but that isolated fresh-execution result does not justify native packaging and maintenance when nearly all observed eligible files were below 100 KB and the completed-preview path showed no Rust gain.
+
+The raw report is `.artifacts/small-file-matrix-20260922.json`.
 
 ## Phase 1 planner prototype
 
@@ -143,12 +163,8 @@ Rust unit tests also pass under AddressSanitizer using pinned nightly `2026-09-2
 
 Native pilot counters now distinguish planning attempts from successful plans, allowing the pilot to enforce the 95% acceptance gate without double-counting suffix assembly. `npm run pilot:start -- [working-directory]` builds and explicitly loads the development binary and automatically exports each nonempty shutdown interval. `npm run pilot:summary -- <snapshot paths>` rejects duplicate intervals and reports the multi-process, call-count, acceptance, and native-failure gates.
 
-## Remaining validation work
+## Rollout decision
 
-Before Linux/WSL adoption:
+Keep the TypeScript accelerator and do not publish or enable the Rust optional package for the observed sub-100 KB workload. The incomplete pilot remains useful reliability evidence but no longer needs to reach the original 100–200-call gate unless native adoption is reconsidered. Reconsider Rust only if workload telemetry shifts materially toward fresh edits near or above 75 KB or large files become common; rerun the pilot before any later rollout.
 
-1. Run and export the 100–200-call privacy-safe pilot across at least two Pi processes.
-2. Aggregate it with `npm run pilot:summary -- <snapshot paths>` and confirm every gate passes.
-3. Publish the Linux platform package and add it as an optional dependency only after the pilot passes.
-
-macOS, Windows, and Bun validation is deferred unless those platforms become intended native targets.
+macOS, Windows, and Bun validation remains deferred unless native adoption is reconsidered for those targets.
