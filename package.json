@@ -36,6 +36,7 @@
     "bench:prefetch": "tsx benchmark/prefetch.ts",
     "bench:suffix-write": "tsx benchmark/suffix-write.ts",
     "bench:group-scaling": "tsx benchmark/group-scaling.ts",
+    "bench:small-files": "tsx benchmark/small-file-matrix.ts",
     "profile": "tsx benchmark/profile-candidate.ts",
     "profile:analyze": "tsx benchmark/analyze-profile.ts",
     "check": "tsc --noEmit",

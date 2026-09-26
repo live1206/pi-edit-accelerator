@@ -267,6 +267,39 @@ describe("edit accelerator extension", () => {
     }
   });
 
+  it("matches built-in bytes when adjacent replacements form a surrogate pair", async () => {
+    initTheme("dark");
+    for (const prepared of [false, true]) {
+      const extensionDirectory = await createDirectory();
+      const builtInDirectory = await createDirectory();
+      await writeFile(join(extensionDirectory, "fixture.txt"), "ab\n", "utf8");
+      await writeFile(join(builtInDirectory, "fixture.txt"), "ab\n", "utf8");
+      const input: EditToolInput = {
+        path: "fixture.txt",
+        edits: [
+          { oldText: "a", newText: "\ud83d" },
+          { oldText: "b", newText: "\ude00" },
+        ],
+      };
+      const extensionTool = loadExtensionTool();
+      let extensionResult;
+      if (prepared) {
+        const preview = renderPreview(extensionTool, extensionDirectory, input, true);
+        [extensionResult] = await Promise.all([
+          execute(extensionTool, extensionDirectory, input),
+          preview.done,
+        ]);
+      } else extensionResult = await execute(extensionTool, extensionDirectory, input);
+      const builtInResult = await execute(createEditToolDefinition(builtInDirectory), builtInDirectory, input);
+
+      expect(extensionResult).toEqual(builtInResult);
+      expect(await readFile(join(extensionDirectory, "fixture.txt"))).toEqual(
+        await readFile(join(builtInDirectory, "fixture.txt")),
+      );
+      expect(await readFile(join(extensionDirectory, "fixture.txt"), "utf8")).toBe("😀\n");
+    }
+  });
+
   it("matches built-in bytes when replacement text splits a surrogate pair", async () => {
     initTheme("dark");
     for (const newText of ["XYZ", "X"]) {
