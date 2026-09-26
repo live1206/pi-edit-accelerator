@@ -49,6 +49,17 @@ Specialized writes avoid rewriting unchanged file regions:
 
 These results demonstrate large-file scaling potential, not guaranteed gains for every edit. Normal-session impact depends on file sizes and fast-path frequency.
 
+A separate Node 22 normal-file-size matrix compared the built-in edit with this TypeScript extension on synthetic TypeScript-shaped ASCII files. The figures below are milliseconds, averaged across three scenario medians (one or three edits; 150 samples per case):
+
+| File | Preview: built-in / TS | Fresh execution: built-in / TS | Preview-reuse execution: built-in / TS |
+|---|---:|---:|---:|
+| ~5 KB | 0.883 / 1.149 | 1.779 / 1.743 | 1.727 / 1.288 |
+| ~18 KB | 1.109 / 1.090 | 2.135 / 1.806 | 2.114 / 1.274 |
+| ~38 KB | 1.409 / 1.054 | 2.755 / 1.820 | 2.657 / 1.301 |
+| ~75 KB | 2.023 / 1.077 | 4.234 / 2.524 | 4.293 / 1.329 |
+
+The smallest preview regressed by ~0.27 ms; preview reuse improved across all buckets. These synthetic results are not a guarantee of savings in a particular session. Reproduce the built-in vs TypeScript comparison with `npm run bench:small-files -- --output .artifacts/small-files.json`.
+
 ## Install
 
 Install from the public GitHub repository:
@@ -142,6 +153,7 @@ npm run bench:positional-write
 npm run bench:prefetch
 npm run bench:suffix-write
 npm run bench:group-scaling
+npm run bench:small-files -- --runs 50 --rounds 3 --warmup 10 --output .artifacts/small-files.json
 npm run profile -- --mode execution --output .artifacts/execution.cpuprofile --report .artifacts/execution-profile.json
 npm run profile:analyze -- .artifacts/execution.cpuprofile --output .artifacts/execution-analysis.json
 ```
