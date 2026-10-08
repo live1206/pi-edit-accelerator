@@ -6,7 +6,6 @@ import {
   initTheme,
   type EditToolInput,
   type ExtensionAPI,
-  type ExtensionContext,
 } from "@earendil-works/pi-coding-agent";
 import { applyPatch } from "diff";
 import { afterEach, describe, expect, it } from "vitest";
@@ -41,7 +40,7 @@ async function execute(
   directory: string,
   input: EditToolInput,
 ) {
-  return tool.execute("tool-call", input, undefined, undefined, { cwd: directory } as ExtensionContext);
+  return tool.execute("tool-call", input, undefined, undefined, { cwd: directory } as Parameters<typeof tool.execute>[4]);
 }
 
 function renderPreview(

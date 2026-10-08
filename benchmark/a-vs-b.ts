@@ -9,7 +9,6 @@ import {
   createEditToolDefinition,
   type EditToolInput,
   type ExtensionAPI,
-  type ExtensionContext,
 } from "@earendil-works/pi-coding-agent";
 import editAccelerator from "../extensions/edit-accelerator.ts";
 
@@ -103,7 +102,7 @@ async function executeSample(tool: EditDefinition, fixture: string) {
       input,
       undefined,
       undefined,
-      { cwd: directory } as ExtensionContext,
+      { cwd: directory } as Parameters<typeof tool.execute>[4],
     );
     const wallTimeMs = performance.now() - startedAt;
     return { wallTimeMs, result, content: await readFile(path, "utf8") };

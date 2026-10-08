@@ -2,7 +2,6 @@ import {
   createEditToolDefinition,
   type EditToolInput,
   type ExtensionAPI,
-  type ExtensionContext,
 } from "@earendil-works/pi-coding-agent";
 import {
   getExactEditInputKey,
@@ -138,7 +137,7 @@ export default function editAccelerator(pi: ExtensionAPI): void {
       }
       return component;
     },
-    async execute(toolCallId, input: EditToolInput, signal, onUpdate, ctx: ExtensionContext) {
+    async execute(toolCallId, input: EditToolInput, signal, onUpdate, ctx) {
       const inputKey = getExactEditInputKey(input, ctx.cwd);
       const matchingPreview = inputKey && preparedPreview?.key === inputKey ? preparedPreview : undefined;
       if (matchingPreview) clearPreparedPreview();

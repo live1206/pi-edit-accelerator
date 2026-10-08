@@ -55,7 +55,7 @@ async function measure(
         input,
         undefined,
         undefined,
-        { cwd: directory } as ExtensionContext,
+        { cwd: directory } as Parameters<typeof builtIn.execute>[4],
       );
   return {
     wallTimeMs: performance.now() - startedAt,

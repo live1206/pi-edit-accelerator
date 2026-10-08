@@ -10,7 +10,6 @@ import {
   initTheme,
   type EditToolInput,
   type ExtensionAPI,
-  type ExtensionContext,
 } from "@earendil-works/pi-coding-agent";
 import editAccelerator from "../extensions/edit-accelerator.ts";
 
@@ -93,7 +92,7 @@ async function execute(tool: EditDefinition, directory: string) {
     input,
     undefined,
     undefined,
-    { cwd: directory } as ExtensionContext,
+    { cwd: directory } as Parameters<typeof tool.execute>[4],
   );
 }
 

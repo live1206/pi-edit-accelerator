@@ -8,7 +8,6 @@ import {
   initTheme,
   type EditToolInput,
   type ExtensionAPI,
-  type ExtensionContext,
 } from "@earendil-works/pi-coding-agent";
 import editAccelerator from "../extensions/edit-accelerator.ts";
 
@@ -86,7 +85,7 @@ async function measure(tool: EditDefinition, prefetch: boolean, streamingDelayMs
       input,
       undefined,
       undefined,
-      { cwd: directory } as ExtensionContext,
+      { cwd: directory } as Parameters<typeof tool.execute>[4],
     );
     await preview;
     return {
