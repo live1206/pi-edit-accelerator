@@ -65,13 +65,13 @@ The smallest preview regressed by ~0.27 ms; preview reuse improved across all bu
 Install from the public GitHub repository:
 
 ```sh
-pi install git:github.com/live1206/pi-edit-accelerator@v0.1.5
+pi install git:github.com/live1206/pi-edit-accelerator@v0.1.6
 ```
 
 Try it for one run without changing settings:
 
 ```sh
-pi -e git:github.com/live1206/pi-edit-accelerator@v0.1.5
+pi -e git:github.com/live1206/pi-edit-accelerator@v0.1.6
 ```
 
 Restart Pi or run `/reload` after installation.
@@ -79,7 +79,7 @@ Restart Pi or run `/reload` after installation.
 Remove it with:
 
 ```sh
-pi remove git:github.com/live1206/pi-edit-accelerator@v0.1.5
+pi remove git:github.com/live1206/pi-edit-accelerator@v0.1.6
 ```
 
 Pi packages execute with full system access. Review the source before installation.
@@ -158,7 +158,7 @@ npm run profile -- --mode execution --output .artifacts/execution.cpuprofile --r
 npm run profile:analyze -- .artifacts/execution.cpuprofile --output .artifacts/execution-analysis.json
 ```
 
-The test suite compares sparse output with Pi's built-in result, display diff, unified patch, and final file bytes.
+The test suite compares sparse output with Pi's built-in result, display diff, unified patch, and final file bytes. CI runs typechecks and tests against Pi 0.85.1 and 1.1.0.
 
 ## Implementation notes
 

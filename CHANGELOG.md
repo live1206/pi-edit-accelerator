@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.1.6 - 2026-10-08
+
+- Infer Pi's tool execution context to fix type errors with Pi 1.1.0 while retaining Pi 0.85.1 compatibility.
+- Derive test and benchmark execution-context types from the built-in edit tool signature.
+- Test typechecking and edit behavior against Pi 0.85.1 and 1.1.0 in CI.
+- Preserve the existing TypeScript edit implementation; experimental native changes are not included.
+
 ## 0.1.5 - 2026-09-18
 
 - Match Pi path normalization by delegating Unicode-space paths.
