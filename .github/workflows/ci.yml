@@ -23,6 +23,6 @@ jobs:
           cache: npm
       - run: npm ci --ignore-scripts
       - if: matrix.pi != '0.85.1'
-        run: npm install --no-save --package-lock=false --ignore-scripts @earendil-works/pi-coding-agent@${{ matrix.pi }}
+        run: npm install --no-save --package-lock=false --ignore-scripts --legacy-peer-deps @earendil-works/pi-coding-agent@${{ matrix.pi }}
       - run: npm run check
       - run: npm test
