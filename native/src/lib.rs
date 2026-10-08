@@ -163,6 +163,14 @@ fn plan_ascii_edits_impl(content: &[u8], edits: Vec<NativeEdit>) -> Option<Nativ
             return None;
         }
         let old = edit.old_text.into_bytes();
+        // Pi counts occurrences after trimming each line of oldText. Literal
+        // uniqueness is only sufficient when that normalization changes nothing.
+        if old.split(|byte| *byte == b'\n').any(|line| {
+            line.last()
+                .is_some_and(|byte| is_ascii_whitespace_except_lf(*byte))
+        }) {
+            return None;
+        }
         let new = edit.new_text.into_bytes();
         let index = memmem::find(content, &old)?;
         if memmem::find(&content[index + 1..], &old).is_some() {
@@ -370,6 +378,29 @@ mod tests {
         assert_eq!(
             plan.suffix_bytes.unwrap().as_ref(),
             b"first expanded\nmiddle\nlast\n"
+        );
+    }
+
+    #[test]
+    fn rejects_normalization_sensitive_old_text() {
+        for whitespace in [" ", "\t", "\u{0b}", "\u{0c}"] {
+            let old_text = format!("a{whitespace}");
+            let content = format!("{old_text}aX\n").into_bytes();
+            assert!(
+                plan_ascii_edits(Buffer::from(content.clone()), vec![edit(&old_text, "b ")])
+                    .is_none()
+            );
+            assert!(
+                prepare_ascii_execution(Buffer::from(content), vec![edit(&old_text, "b ")])
+                    .is_none()
+            );
+        }
+    }
+
+    #[test]
+    fn allows_interior_old_text_whitespace_and_new_text_trailing_whitespace() {
+        assert!(
+            plan_ascii_edits(Buffer::from(b"a bX\n".to_vec()), vec![edit("a b", "c d ")]).is_some()
         );
     }
 

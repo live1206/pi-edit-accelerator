@@ -1,6 +1,7 @@
+import { existsSync } from "node:fs";
 import { mkdtemp, readFile, readdir, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { join, resolve } from "node:path";
 import {
   createEditToolDefinition,
   initTheme,
@@ -11,6 +12,7 @@ import {
 import { applyPatch } from "diff";
 import { afterEach, describe, expect, it } from "vitest";
 import editAccelerator from "../extensions/edit-accelerator.ts";
+import { resetNativePlannerForTests } from "../src/native-planner.ts";
 
 const tempDirectories: string[] = [];
 const originalPilotDirectory = process.env.PI_EDIT_ACCELERATOR_PILOT_DIR;
@@ -90,6 +92,42 @@ function renderPreview(
 }
 
 describe("edit accelerator extension", () => {
+  const nativePath = resolve("native/pi-edit-accelerator-native.linux-x64-gnu.node");
+  const nativeAvailable = process.env.PI_EDIT_ACCELERATOR_NATIVE !== "0" && existsSync(nativePath);
+
+  it.skipIf(!nativeAvailable).each([false, true])(
+    "rejects fuzzy-normalized duplicates with native execution (preview: %s)",
+    async (withPreview) => {
+      initTheme("dark");
+      const originalNativePath = process.env.PI_EDIT_ACCELERATOR_NATIVE_PATH;
+      process.env.PI_EDIT_ACCELERATOR_NATIVE_PATH = nativePath;
+      resetNativePlannerForTests();
+      try {
+        const directory = await createDirectory();
+        const path = join(directory, "fixture.txt");
+        const original = "a aX\n";
+        await writeFile(path, original, "utf8");
+        const input: EditToolInput = {
+          path: "fixture.txt",
+          edits: [{ oldText: "a ", newText: "b " }],
+        };
+        const duplicateError = "Found 2 occurrences of the text in fixture.txt.";
+        await expect(execute(createEditToolDefinition(directory), directory, input))
+          .rejects.toThrow(duplicateError);
+        expect(await readFile(path, "utf8")).toBe(original);
+
+        const tool = loadExtensionTool();
+        if (withPreview) await renderPreview(tool, directory, input).done;
+        await expect(execute(tool, directory, input)).rejects.toThrow(duplicateError);
+        expect(await readFile(path, "utf8")).toBe(original);
+      } finally {
+        if (originalNativePath === undefined) delete process.env.PI_EDIT_ACCELERATOR_NATIVE_PATH;
+        else process.env.PI_EDIT_ACCELERATOR_NATIVE_PATH = originalNativePath;
+        resetNativePlannerForTests();
+      }
+    },
+  );
+
   it("builds an accelerated interactive preview from a streamed path", async () => {
     initTheme("dark");
     const directory = await createDirectory();
