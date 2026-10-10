@@ -17,48 +17,57 @@ This extension:
 
 ## Performance
 
-Clean benchmark on Node 22.23.2, Pi 0.85.1, Linux/WSL2, AMD EPYC 7763, using a 5 MB file and two distant exact edits:
+Latest retest (2026-10-10): accelerator 0.1.6 against **Pi 1.1.0**, Node 26.10.0, Linux/WSL2, AMD EPYC 7763. A ~5 MiB file with two distant exact edits measured:
 
-| Execution | Median | p95 |
-|---|---:|---:|
-| Pi built-in edit | 401.11 ms | 495.65 ms |
-| Sparse extension | 33.56 ms | 39.27 ms |
+| Scenario | Pi built-in median | Accelerator median | Speedup |
+|---|---:|---:|---:|
+| Execution | 251.40 ms | 14.98 ms | **16.8×** |
+| Preview | 186.07 ms | 10.77 ms | **17.3×** |
+| Interactive, length-changing edits | 436.34 ms | 26.41 ms | **16.5×** |
+| Interactive, equal-byte-length edits | 420.64 ms | 14.09 ms | **29.8×** |
 
-Version 0.1.5 reduced median execution latency by approximately 92% on this stress fixture.
+Median execution latency was approximately **94% lower**. Execution p95 was 323.88 ms built-in versus 25.24 ms accelerated. Execution used 20 alternating samples after three warmups; preview and interactive measurements used 10 alternating samples. Interactive latency includes preview and execution; standalone preview measures renderer invalidation, not terminal drawing.
 
-An exploratory interactive-preview benchmark measured:
+A fresh Pi 0.85.1 baseline on the same runtime measured 253.05 ms built-in versus 15.60 ms accelerated for execution. Pi 1.1.0 has not materially closed the large-file execution gap; small version-to-version differences should not be treated as proven improvements.
 
-| Preview | Median |
-|---|---:|
-| Pi built-in preview | 299.08 ms |
-| Sparse extension preview | 15.69 ms |
-
-Version 0.1.5 also preserves sparse scaling for large batches of independent line-local edits:
+Large batches of independent line-local edits also retain sparse scaling (three samples per implementation):
 
 | Batch execution | Sparse extension | Pi built-in | Median reduction |
 |---|---:|---:|---:|
-| 100 edits, 140 KB file | 11.67 ms | 101.50 ms | 89% |
-| 200 edits, 278 KB file | 33.41 ms | 366.12 ms | 91% |
+| 100 edits, 140 KB file | 10.52 ms | 61.45 ms | 83% |
+| 200 edits, 278 KB file | 33.18 ms | 304.83 ms | 89% |
 
-Specialized writes avoid rewriting unchanged file regions:
+Specialized writes avoid rewriting unchanged file regions. These experiments compare accelerator write strategies after planning, not the accelerator against Pi's built-in tool (20 samples per strategy):
 
 | Prepared write path | Sparse write | Full-file write | Median reduction |
 |---|---:|---:|---:|
-| Equal-byte-length positional writes | 4.50 ms | 28.32 ms | 84% |
-| Length-changing near-end suffix write | 5.67 ms | 26.91 ms | 79% |
+| Equal-byte-length positional writes | 3.55 ms | 8.92 ms | 60% |
+| Length-changing near-end suffix write | 3.58 ms | 8.95 ms | 60% |
 
-These results demonstrate large-file scaling potential, not guaranteed gains for every edit. Normal-session impact depends on file sizes and fast-path frequency.
+With a simulated 50 ms argument-streaming window, prefetch reduced median post-argument latency from 13.13 ms to 10.97 ms (approximately 16%).
 
-A separate Node 22 normal-file-size matrix compared the built-in edit with this TypeScript extension on synthetic TypeScript-shaped ASCII files. The figures below are milliseconds, averaged across three scenario medians (one or three edits; 150 samples per case):
+A separate Pi 1.1.0 normal-file-size matrix compared the built-in edit with this TypeScript extension on synthetic TypeScript-shaped ASCII files. The figures below are milliseconds, averaged across three scenario medians (one or three edits; 150 samples per case over three rounds):
 
 | File | Preview: built-in / TS | Fresh execution: built-in / TS | Preview-reuse execution: built-in / TS |
 |---|---:|---:|---:|
-| ~5 KB | 0.883 / 1.149 | 1.779 / 1.743 | 1.727 / 1.288 |
-| ~18 KB | 1.109 / 1.090 | 2.135 / 1.806 | 2.114 / 1.274 |
-| ~38 KB | 1.409 / 1.054 | 2.755 / 1.820 | 2.657 / 1.301 |
-| ~75 KB | 2.023 / 1.077 | 4.234 / 2.524 | 4.293 / 1.329 |
+| ~5 KB | 0.490 / 0.796 | 1.054 / 0.915 | 1.033 / 1.311 |
+| ~18 KB | 0.680 / 0.593 | 1.339 / 0.944 | 1.307 / 1.331 |
+| ~38 KB | 1.026 / 0.615 | 1.828 / 0.967 | 1.765 / 1.372 |
+| ~75 KB | 1.621 / 0.660 | 3.128 / 1.478 | 3.094 / 1.316 |
 
-The smallest preview regressed by ~0.27 ms; preview reuse improved across all buckets. These synthetic results are not a guarantee of savings in a particular session. Reproduce the built-in vs TypeScript comparison with `npm run bench:small-files -- --output .artifacts/small-files.json`.
+At ~5 KB, preview and execution after preview were slower by approximately 0.31 ms and 0.28 ms on average; fresh execution was slightly faster. At ~18 KB, execution after preview was mixed across scenarios. At ~38–75 KB, all three measured lifecycles improved. Preview-reuse execution excludes preview time; these separately collected medians should not be added to estimate complete interactive latency.
+
+These synthetic results demonstrate scaling potential, not guaranteed gains for every edit or end-to-end agent latency improvements. Normal-session impact depends on file sizes and fast-path frequency. Both Pi versions passed all 69 compatibility tests and type checking.
+
+See the [full Pi 1.1.0 performance report](docs/performance-pi-1.1.0.md) for per-case results, methodology, and reproduction commands. The development dependency remains pinned to Pi 0.85.1; to reproduce this retest, install Pi 1.1.0 locally without changing the manifests before running the benchmarks:
+
+```sh
+npm install --no-save --package-lock=false --ignore-scripts --legacy-peer-deps @earendil-works/pi-coding-agent@1.1.0
+npm run bench:a-vs-b -- --runs 20 --warmup 3
+npm run bench:small-files -- --output .artifacts/small-files.json
+```
+
+Run `npm ci` afterward to restore the pinned dependency environment.
 
 ## Install
 
